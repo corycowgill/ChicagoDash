@@ -306,8 +306,20 @@ $('#set-quality').onchange = (e) => {
   game.setQuality(e.target.value);
   commit();
 };
-$('#set-reset').onclick = () => {
-  if (!confirm('Reset all coins, unlocks and records?')) return;
+$('#set-reset').onclick = (e) => {
+  // Two-tap confirmation (native confirm() dialogs are blocked in some embeds).
+  const btn = e.currentTarget;
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Tap again to reset';
+    setTimeout(() => {
+      delete btn.dataset.armed;
+      btn.textContent = 'Reset save';
+    }, 3000);
+    return;
+  }
+  delete btn.dataset.armed;
+  btn.textContent = 'Reset save';
   save = resetSave();
   ensureDaily(save);
   game.save = save;
