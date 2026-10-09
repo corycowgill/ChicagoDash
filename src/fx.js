@@ -38,6 +38,7 @@ export class FX {
       p.userData.max = p.userData.life;
       p.userData.g = gravity;
       p.userData.s = p.scale.x;
+      p.userData.keepSize = false;
       p.rotation.set(Math.random() * 3, Math.random() * 3, 0);
       this.parts.push(p);
     }
@@ -51,6 +52,20 @@ export class FX {
     m.userData.life = 0.45;
     this.scene.add(m);
     this.rings.push(m);
+  }
+
+  /** A sheet of newspaper (or a leaf) caught in a Windy City gust. */
+  paper(pos, color = 0xf2efe6) {
+    const p = this.get(basic(color, { side: THREE.DoubleSide }), G.plane());
+    p.position.copy(pos);
+    p.scale.set(0.5, 0.35, 1);
+    p.userData.v.set(16 + Math.random() * 8, Math.random() * 2, (Math.random() - 0.5) * 3);
+    p.userData.life = p.userData.max = 1.6;
+    p.userData.g = 0.5;
+    p.userData.s = 0.5;
+    p.userData.keepSize = true;
+    p.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+    this.parts.push(p);
   }
 
   poof(pos, color = 0xdddddd) {
@@ -71,7 +86,7 @@ export class FX {
       p.userData.v.y -= p.userData.g * dt;
       p.position.addScaledVector(p.userData.v, dt);
       p.rotation.x += dt * 6;
-      p.scale.setScalar(p.userData.s * (p.userData.life / p.userData.max));
+      if (!p.userData.keepSize) p.scale.setScalar(p.userData.s * (p.userData.life / p.userData.max));
     }
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const r = this.rings[i];

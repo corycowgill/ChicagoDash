@@ -5,6 +5,7 @@ import { Audio } from './audio.js';
 import { CHARACTERS } from './characters.js';
 import { THEMES, EVENTS, autoEvent, SECTION_LEN } from './world.js';
 import { PICKUPS } from './models.js';
+import { FACTS, GAME_OVER, pick as pickOne } from './chicago.js';
 import {
   load, persist, resetSave, UPGRADES, MAX_UPGRADE, upgradeCost, powerDuration, OUTFIT_COST,
   dailyChallenges, ensureDaily, challengeProgress, commitDaily, ACHIEVEMENTS, checkAchievements,
@@ -387,7 +388,8 @@ const reviveCost = () => 150 * Math.pow(2, revives);
 function onGameOver(run) {
   audio.stopMusic();
   const best = Math.max(save.highScore, Math.floor(run.score));
-  $('#over-title').textContent = pick(['Game Over', 'Wiped Out!', 'Ouch, Chicago!', 'Da Bears... fell']);
+  $('#over-title').textContent = pickOne(GAME_OVER);
+  $('#over-fact').textContent = pickOne(FACTS);
   $('#over-score').textContent = fmt(run.score);
   $('#over-dist').textContent = fmt(run.distance);
   $('#over-coins').textContent = fmt(run.coins);
@@ -406,10 +408,6 @@ function onGameOver(run) {
   rb.classList.toggle('hidden', revives >= 3 || total < cost);
   rb.innerHTML = `<span class="reward">Keep running · <span class="coin-ico"></span>${fmt(cost)}</span>`;
   show('over');
-}
-
-function pick(a) {
-  return a[(Math.random() * a.length) | 0];
 }
 
 $('#btn-revive').onclick = () => {
@@ -439,7 +437,7 @@ function finishRun(run) {
   save.totalDistance += Math.floor(run.distance);
   save.highScore = Math.max(save.highScore, Math.floor(run.score));
   save.bestDistance = Math.max(save.bestDistance, Math.floor(run.distance));
-  for (const k of ['pizza', 'hotdog', 'shamrock', 'flagSaves', 'trainRoofs']) save.stats[k] += run[k] || 0;
+  for (const k of ['pizza', 'hotdog', 'shamrock', 'flagSaves', 'trainRoofs', 'popcorn', 'dibs', 'gusts']) save.stats[k] += run[k] || 0;
   save.stats.flag += run.flagSaves || 0;
   const evKey = { night: 'nightDist', snow: 'snowDist', stpats: 'stpatsDist', gameday: 'gamedayDist' }[run.event];
   if (evKey) save.stats[evKey] += Math.floor(run.distance);
@@ -530,6 +528,7 @@ function onToast(text, kind = '') {
 // Boot
 // ---------------------------------------------------------------------------
 function boot() {
+  $('#load-fact').textContent = pickOne(FACTS);
   try {
     game = new Game($('#game'), save, audio, {
       consumeInput: () => input.consume(),

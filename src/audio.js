@@ -119,6 +119,27 @@ export class Audio {
         this.tone(1760, 0.3, { type: 'sine', vol: 0.15 });
         this.tone(1760, 0.3, { type: 'sine', vol: 0.15, delay: 0.15 });
         break;
+      case 'chime':
+        // CTA door chime: two falling tones
+        this.tone(659, 0.35, { type: 'sine', vol: 0.18 });
+        this.tone(523, 0.5, { type: 'sine', vol: 0.18, delay: 0.32 });
+        break;
+      case 'buckets':
+        // bucket drummers: a quick street-beat fill
+        [0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5, 0.55, 0.6, 0.7].forEach((d, i) => {
+          this.noiseHit(0.08, { vol: 0.22, freq: i % 3 === 0 ? 180 : 700, type: i % 3 === 0 ? 'lowpass' : 'bandpass', delay: d });
+          if (i % 3 === 0) this.tone(110, 0.1, { type: 'sine', vol: 0.25, delay: d });
+        });
+        break;
+      case 'wind':
+        this.noiseHit(1.6, { vol: 0.3, freq: 500, type: 'bandpass' });
+        this.noiseHit(1.2, { vol: 0.18, freq: 1400, type: 'bandpass', delay: 0.3 });
+        break;
+      case 'popcorn':
+        for (let i = 0; i < 7; i++) this.noiseHit(0.04, { vol: 0.25, freq: 2000 + i * 300, delay: i * 0.05 + Math.random() * 0.03 });
+        this.tone(880, 0.1, { vol: 0.12, delay: 0.3 });
+        this.tone(1175, 0.15, { vol: 0.12, delay: 0.38 });
+        break;
       default:
         break;
     }
@@ -141,9 +162,10 @@ export class Audio {
     if (!this.ctx) return;
     const bpm = 132 + this.intensity * 24;
     const stepDur = 60 / bpm / 4;
-    // I–vi–IV–V in C, bouncy bass + pentatonic hook
-    const roots = [130.81, 110.0, 174.61, 196.0];
-    const hook = [0, 2, 4, 7, 9, 7, 4, 2, 0, 4, 7, 12, 9, 7, 4, 2];
+    // Chicago blues changes (I–IV–I–V) over a house four-on-the-floor,
+    // with a blue-note hook (flat 3rd, flat 5th, flat 7th).
+    const roots = [130.81, 174.61, 130.81, 196.0];
+    const hook = [0, 3, 5, 6, 7, 6, 5, 3, 0, 3, 5, 7, 10, 7, 5, 3];
     const semis = (n) => Math.pow(2, n / 12);
     while (this.nextTime < this.ctx.currentTime + 0.15) {
       const s = this.step % 64;

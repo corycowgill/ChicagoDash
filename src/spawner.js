@@ -4,6 +4,7 @@
 import { LANES, THEMES, themeIndexAt, SECTION_LEN } from './world.js';
 import * as M from './models.js';
 import { bake, disposeObject } from './geo.js';
+import { FESTIVALS } from './chicago.js';
 
 export const ACTIVATE_DIST = 75; // moving hazards start rolling this far ahead
 const RAMP_LEN = 7;
@@ -21,17 +22,21 @@ const OBST = {
   cart: { make: M.makeHotDogCart, kind: 'block', depth: 1.5 },
   planter: { make: M.makePlanterBlock, kind: 'block', depth: 1.5 },
   tourists: { make: M.makePedestrianGroup, kind: 'block', depth: 0.8 },
+  banner: { make: () => M.makeFestivalBanner(FESTIVALS[(Math.random() * FESTIVALS.length) | 0]), kind: 'slide', y0: 1.3, depth: 0.3 },
+  drummers: { make: M.makeBucketDrummers, kind: 'block', depth: 1.4, sfx: 'buckets' },
+  dibs: { make: M.makeDibsChair, kind: 'jump', y1: 1.05, depth: 0.9 },
   bike: { make: () => M.makeBike([0x2b9bff, 0x2b9bff, 0x39b54a, 0xff6b6b][(Math.random() * 4) | 0]), kind: 'block', depth: 1.6, speed: 6 },
 };
 
 const THEME_OBS = {
   loop: { jump: ['barricade', 'sawhorse', 'cones'], slide: ['bar'], block: [], trains: true },
+  millennium: { jump: ['bench', 'cones', 'barricade'], slide: ['banner'], block: ['drummers', 'tourists'] },
   riverwalk: { jump: ['bench', 'cones', 'sawhorse'], slide: ['girder'], block: ['planter', 'tourists'] },
   wrigley: { jump: ['trash', 'sawhorse', 'barricade', 'cones'], slide: ['bar'], block: ['cart'] },
   lincoln: { jump: ['hedge', 'bench', 'cones'], slide: ['branch'], block: ['bike', 'bike', 'tourists'] },
 };
 
-const POWER_WEIGHTS = { pizza: 26, coffee: 24, flag: 20, hotdog: 18, shamrock: 7 };
+const POWER_WEIGHTS = { pizza: 26, coffee: 22, flag: 20, hotdog: 18, popcorn: 14, shamrock: 7 };
 
 function pick(a) {
   return a[(Math.random() * a.length) | 0];
@@ -95,6 +100,10 @@ export class Spawner {
           o.obj.position.z += dz;
           if (o.type === 'bike') o.obj.children.forEach((c) => c.geometry?.type === 'TorusGeometry' && (c.rotation.x -= dt * 10));
         }
+      }
+      if (o.sfx && !o.sfxDone && pz - o.zFront < 40) {
+        o.sfxDone = true;
+        g.audio.play(o.sfx);
       }
       if (o.zBack > pz + 14) {
         this.disposeObstacle(o);
@@ -165,6 +174,8 @@ export class Spawner {
     const pass = new Set(passable());
     for (const l of lanes) {
       let type = pick(T[kinds[l]]);
+      // After a snowstorm, shoveled spots get claimed with a lawn chair.
+      if (kinds[l] === 'jump' && g.event === 'snow' && themeId !== 'loop' && Math.random() < 0.4) type = 'dibs';
       if (OBST[type].speed && !this.canMove(l, d, OBST[type].speed, speed)) {
         type = pick(T.jump);
         kinds[l] = 'jump';
@@ -300,6 +311,7 @@ export class Spawner {
       speed: def.speed || 0,
       active: false,
       jumpable: def.kind === 'jump',
+      sfx: def.sfx || null,
     };
     this.obstacles.push(o);
     this.laneLast[lane] = Math.max(this.laneLast[lane], d);

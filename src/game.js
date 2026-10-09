@@ -7,6 +7,7 @@ import { buildCharacter } from './characters.js';
 import { powerDuration } from './save.js';
 import { PICKUPS, TRAIN_H } from './models.js';
 import { G } from './geo.js';
+import { CHEERS, OUCHES, pick } from './chicago.js';
 import { basic } from './materials.js';
 
 const GRAVITY = 40;
@@ -138,9 +139,14 @@ export class Game {
     this.run = {
       distance: 0, coins: 0, score: 0, pizza: 0, hotdog: 0, powerups: 0, jumps: 0, slides: 0,
       noHitDist: 0, sinceHit: 0, trainRoofs: 0, flagSaves: 0, shamrock: 0, hits: 0, event: this.event,
-      neighborhoods: 1,
+      neighborhoods: 1, popcorn: 0, dibs: 0, gusts: 0,
     };
     this.roofsSeen = new Set();
+    this.runTime = 0;
+    this.nextGust = 30 + Math.random() * 20;
+    this.gustT = 0;
+    this.lastCheer = 0;
+    this.dibsSeen = false;
     this.char.root.rotation.y = 0;
     this.hooks.onTheme?.(THEMES[0], true);
   }
@@ -311,6 +317,31 @@ export class Game {
       this.nextMilestone += 500;
     }
 
+    // CTA station announcements as you roll through the Loop
+    const st = this.world.stations;
+    while (st.length && st[0].z > p.z) {
+      const s = st.shift();
+      this.audio.play('chime');
+      this.hooks.onToast?.(`🔔 This is ${s.name}. Doors closing.`, 'milestone');
+    }
+
+    // Windy City gusts: newspapers fly and the wind blows coins your way
+    this.runTime += dt;
+    if (this.runTime > this.nextGust) {
+      this.nextGust = this.runTime + 40 + Math.random() * 25;
+      this.gustT = 3.5;
+      run.gusts++;
+      this.audio.play('wind');
+      this.hooks.onToast?.('🌬️ Windy City gust! Coins blowin\' your way', 'power');
+    }
+    if (this.gustT > 0) {
+      this.gustT -= dt;
+      if (Math.random() < 0.6) {
+        const leaf = THEMES[ti].id === 'lincoln' || THEMES[ti].id === 'millennium';
+        this.fx.paper(new THREE.Vector3(p.x - 9, 1 + Math.random() * 4, p.z - 4 - Math.random() * 12), leaf && Math.random() < 0.5 ? 0xe8a23a : 0xf2efe6);
+      }
+    }
+
     // character + camera
     const mode = !p.grounded ? 'jump' : p.slideT > 0 ? 'slide' : 'run';
     this.char.update(dt, { mode, runRate: this.speed / 16, lean: (tx - p.x) * -0.4, jumpT: Math.min(1, Math.abs(p.vy) / JUMP_V) });
@@ -388,7 +419,13 @@ export class Game {
       if (Math.abs(p.x - o.x) > o.halfW + PLAYER_HW) continue;
       if (o.kind === 'train') {
         if (p.y >= o.top - 0.6) continue; // running on the roof
-      } else if (p.y >= o.y1 || p.y + h <= o.y0) continue;
+      } else if (p.y >= o.y1 || p.y + h <= o.y0) {
+        if (!o.cleared) {
+          o.cleared = true;
+          this.onClear(o);
+        }
+        continue;
+      }
 
       // Swerving into something from the side just bounces you back.
       const wasInLane = Math.abs(prevX - o.x) <= o.halfW + PLAYER_HW - 0.05;
@@ -399,6 +436,22 @@ export class Game {
       }
       this.crash(o);
       return;
+    }
+  }
+
+  /** Jumped or slid past something cleanly: dibs bookkeeping and the odd cheer. */
+  onClear(o) {
+    if (o.type === 'dibs') {
+      this.run.dibs++;
+      if (!this.dibsSeen) {
+        this.dibsSeen = true;
+        this.hooks.onToast?.('Dibs! Never move the chair.', 'milestone');
+        return;
+      }
+    }
+    if (this.time - this.lastCheer > 8 && Math.random() < 0.12) {
+      this.lastCheer = this.time;
+      this.hooks.onToast?.(pick(CHEERS), 'milestone');
     }
   }
 
@@ -443,7 +496,7 @@ export class Game {
     p.invuln = 2.0;
     this.speed *= 0.7;
     this.clearAhead(o);
-    this.hooks.onToast?.('Ouch! Watch out!', 'hit');
+    this.hooks.onToast?.(pick(OUCHES), 'hit');
   }
 
   /** After a non-fatal crash, clear the hazard (and its row) so the runner can recover. */
@@ -490,7 +543,7 @@ export class Game {
   collectPickups(dt) {
     const p = this.player;
     const cy = p.y + (p.slideT > 0 && p.grounded ? 0.45 : 0.9);
-    const magnet = this.powers.coffee > 0;
+    const magnet = this.powers.coffee > 0 || this.gustT > 0;
     for (let i = this.spawner.pickups.length - 1; i >= 0; i--) {
       const it = this.spawner.pickups[i];
       if (it.z > p.z + 2 || it.z < p.z - 24) continue;
@@ -534,6 +587,17 @@ export class Game {
       else run.score += 500;
       this.audio.play('life');
       this.hooks.onToast?.('☘️ Extra life!', 'power');
+      return;
+    }
+    if (it.type === 'popcorn') {
+      // Chicago Mix: instant bonus, no timer
+      const mult = this.powers.pizza > 0 ? 2 : 1;
+      run.popcorn++;
+      run.coins += 15;
+      run.score += 250 * mult;
+      this.audio.play('popcorn');
+      this.fx.burst(new THREE.Vector3(p.x, p.y + 1.4, p.z), { color: 0xffa51f, n: 16, speed: 5, size: 0.14, shape: 'sphere', up: 4 });
+      this.hooks.onToast?.('🍿 Chicago Mix! +15 coins', 'power');
       return;
     }
     if (it.type === 'pizza') run.pizza++;

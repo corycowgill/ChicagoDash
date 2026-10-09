@@ -10,6 +10,12 @@ import {
   makeLampPost, makeTwinLamp, makeBusShelter, makeMailbox, makeFlowerPlanter, makeTree, makeParkedBike,
   makeBalustrade, makeRailing, makeWaterTaxi, makeTourBoat, makePennantString, makeFan, makeTrain, makeBench,
 } from './models.js';
+import {
+  getChrome, cloudGate, crownFountain, buckinghamFountain, pritzkerPavilion, artInstituteLions, marinaCity,
+  ferrisWheel, sailboat, lifeguardStand, zooGiraffes, picasso, rooftopBleachers, oldScoreboard, streetSign,
+  busker, pigeons,
+} from './landmarks.js';
+import { STREETS } from './chicago.js';
 
 export const LANE_W = 2.4;
 export const LANES = [-LANE_W, 0, LANE_W];
@@ -19,6 +25,7 @@ const AHEAD = 270;
 
 export const THEMES = [
   { id: 'loop', name: 'The Loop', tag: 'Race the "L" between the skyscrapers' },
+  { id: 'millennium', name: 'Millennium Park', tag: 'The Bean, Crown Fountain & Buckingham Fountain' },
   { id: 'riverwalk', name: 'The Riverwalk', tag: 'Bridges, boats and the Chicago River' },
   { id: 'wrigley', name: 'Wrigleyville', tag: 'Game day energy on Clark & Addison' },
   { id: 'lincoln', name: 'Lincoln Park', tag: 'Lakefront trail with skyline views' },
@@ -70,6 +77,7 @@ export class World {
     this.event = 'day';
     this.time = 0;
     this.nextChunk = 0;
+    this.stations = []; // CTA stations ahead, for the "Doors closing" announcement
 
     this.root = new THREE.Group();
     scene.add(this.root);
@@ -134,6 +142,7 @@ export class World {
     this.lakeMat.map = waterTex(ev === 'stpats' ? '#2fbf6a' : night ? '#14305a' : '#3aa0e8');
     this.lakeMat.needsUpdate = true;
     for (const m of this.skylineMats) m.color.copy(m.userData.base).multiplyScalar(night ? 0.45 : 1);
+    getChrome().color.set(night ? 0x6f7a99 : 0xdfe6ee);
     for (const m of this.skylineWin) m.opacity = night ? 1 : 0;
   }
 
@@ -219,6 +228,27 @@ export class World {
     g.clear();
     g.add(towers);
 
+    // Navy Pier's Ferris wheel turning on the lakefront horizon. Its materials
+    // are swapped for fog-free copies so it stays visible like the skyline.
+    const fw = ferrisWheel();
+    const swapped = new Map();
+    fw.group.traverse((o) => {
+      if (!o.isMesh) return;
+      if (!swapped.has(o.material)) {
+        const m = o.material.clone();
+        m.fog = false;
+        m.userData = { base: m.color.clone() };
+        this.skylineMats.push(m);
+        swapped.set(o.material, m);
+      }
+      o.material = swapped.get(o.material);
+    });
+    fw.group.position.set(118, 0, 10);
+    fw.group.scale.setScalar(1.3);
+    fw.group.rotation.y = -0.5;
+    this.ferris = fw.wheel;
+    g.add(fw.group);
+
     // Clouds
     const cloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, fog: false });
     this.skylineMats.push(Object.assign(cloudMat, { userData: { base: new THREE.Color(0xffffff) } }));
@@ -280,6 +310,7 @@ export class World {
     this.chunks.clear();
     for (const a of this.animated) this.removeAnimated(a);
     this.animated = [];
+    this.stations = [];
     this.nextChunk = 0;
   }
 
@@ -307,6 +338,7 @@ export class World {
     }
     this.skyline.position.z = playerZ - 330;
     this.clouds.position.x = (this.time * 2) % 80;
+    this.ferris.rotation.z = this.time * 0.06;
     // water flow
     this.waterMat.map.offset.y = (this.time * 0.15) % 1;
     this.lakeMat.map.offset.x = (this.time * 0.03) % 1;
@@ -347,10 +379,12 @@ export class World {
     const animated = [];
     const ctx = { g, animated, i, local, z0 };
     if (theme === 'loop') this.buildLoop(ctx);
+    else if (theme === 'millennium') this.buildMillennium(ctx);
     else if (theme === 'riverwalk') this.buildRiverwalk(ctx);
     else if (theme === 'wrigley') this.buildWrigley(ctx);
     else this.buildLincoln(ctx);
     if (local === 0 && i > 0) this.buildGateway(ctx, THEMES[ti].name);
+    this.addStreetLife(ctx, theme);
     if (this.event === 'gameday' && (theme === 'wrigley' || theme === 'loop') && i % 2 === 0) {
       const p = makePennantString(theme === 'loop' ? 9 : 15);
       p.position.z = -12;
@@ -415,7 +449,7 @@ export class World {
 
   // -------------------------------------------------------------------------
   // THE LOOP — elevated tracks among skyscrapers
-  buildLoop({ g, animated, i, local }) {
+  buildLoop({ g, animated, i, local, z0 }) {
     const L = CHUNK_LEN;
     // gravel deck
     this.ground(g, toon(this.event === 'snow' ? 0xdfe3e8 : 0x7a6e62), 10);
@@ -465,6 +499,14 @@ export class World {
     }
     // skyscrapers rising from the street on both sides
     for (const s of [-1, 1]) {
+      if (s === 1 && local === 12) {
+        // Daley Plaza and its untitled Picasso, in place of a tower.
+        const pic = picasso();
+        pic.position.set(22, -6, -15);
+        pic.scale.setScalar(1.25);
+        g.add(pic);
+        continue;
+      }
       let z = 0;
       while (z < L) {
         const d = rand(8, 13);
@@ -489,6 +531,7 @@ export class World {
     // station sign
     if (local % 5 === 3) {
       const name = STATIONS[(i / 5 | 0) % STATIONS.length];
+      this.stations.push({ z: z0 - 8, name });
       const t = signTexCached(name);
       for (const s of [-1, 1]) {
         g.add(box(toon(0x2b2f36), 0.12, 3.2, 0.12, s * 4.8, 1.6, -8));
@@ -499,6 +542,113 @@ export class World {
         // platform canopy
         g.add(box(toon(0x8b2a2a), 2.2, 0.15, 10, s * 7.3, 3.8, -8));
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // MILLENNIUM PARK — the Bean, Crown Fountain, Pritzker, Buckingham, the lions
+  buildMillennium({ g, animated, i, local }) {
+    const L = CHUNK_LEN;
+    const snow = this.event === 'snow';
+    this.ground(g, toon(0xffffff, { map: paverTex(snow ? '#eeeeee' : '#d8d4cc') }), 8.6);
+    const grass = toon(0xffffff, { map: grassTex(snow ? '#e9eef3' : '#6cc04a') });
+    this.ground(g, grass, 44, -26.3, -0.02);
+    this.ground(g, grass, 6, 7.3, -0.02);
+    // Michigan Avenue and its historic streetwall on the right
+    this.ground(g, toon(0xffffff, { map: asphaltTex() }), 8, 14.3, -0.03);
+    for (let z = 0; z < L; ) {
+      const d = rand(8, 12);
+      const h = rand(22, 58);
+      this.building(g, 25 + rand(0, 2), -z - d / 2, 12, h, d, pick(['stone', 'stone', 'brick', 'glass']), pick(['#e6dcc8', '#d9cdb4', '#b5653d', '#5c8fc4']), (i * 5 + z) | 0, -0.03);
+      z += d + 0.4;
+    }
+    for (let z = 5; z < L; z += 10) {
+      const lamp = makeTwinLamp();
+      lamp.position.set(4.8, 0, -z);
+      g.add(lamp);
+    }
+    const landmark = [2, 5, 9, 13, 17].includes(local);
+    if (local === 2) {
+      const bean = cloudGate();
+      bean.position.set(-14, 0, -15);
+      bean.rotation.y = 0.25;
+      g.add(bean);
+      // tourists taking Bean selfies
+      for (let k = 0; k < 6; k++) {
+        const f = makeFan(pick([0xff6b6b, 0x4dabf7, 0xffd43b, 0x9775fa, 0x63e6be]));
+        f.position.set(-14 + rand(-8, 8), 0, -15 + (k % 2 ? 6.5 : -6.5) + rand(-1, 1));
+        f.rotation.y = f.position.z > -15 ? Math.PI : 0;
+        g.add(f);
+      }
+    } else if (local === 5) {
+      const cf = crownFountain(i);
+      cf.position.set(-13, 0, -15);
+      g.add(cf);
+    } else if (local === 9) {
+      const pp = pritzkerPavilion();
+      pp.position.set(-52, 0, -15);
+      g.add(pp);
+    } else if (local === 13) {
+      const bf = buckinghamFountain();
+      bf.group.position.set(-20, 0, -15);
+      g.add(bf.group);
+      const jet = bf.jet;
+      jet.position.set(-20, 5.6, -15);
+      animated.push({ obj: jet, tail: 0, update(dt, t) { jet.scale.y = 11 + Math.sin(t * 1.3) * 3; } });
+    } else if (local === 17) {
+      const lions = artInstituteLions(this.event);
+      lions.position.set(-9, 0, -15);
+      lions.rotation.y = Math.PI;
+      g.add(lions);
+    }
+    // benches, trees and picnics on the lawn
+    for (let z = 3; z < L; z += 9) {
+      const b = makeBench();
+      b.position.set(-5.4, 0, -z);
+      b.rotation.y = Math.PI / 2;
+      g.add(b);
+    }
+    if (!landmark) {
+      for (let z = 2; z < L; z += rand(5, 8)) {
+        const t = makeTree(rand(1, 1.4), snow ? 0xe6eef5 : pick([0x3fae49, 0x4caf50, 0x2f9e44]));
+        t.position.set(rand(-9, -22), 0, -z);
+        g.add(t);
+      }
+      if (!snow) {
+        // picnic blanket with two people
+        const x = rand(-14, -24);
+        const z = -rand(5, 25);
+        g.add(box(toon(pick([0xe63946, 0x4dabf7, 0xffd43b])), 2.4, 0.04, 2.4, x, 0.03, z));
+        for (const dx of [-0.6, 0.6]) {
+          const f = makeFan(pick([0xffffff, 0xff8c42, 0x69db7c]));
+          f.position.set(x + dx, -0.6, z);
+          g.add(f);
+        }
+      }
+    }
+  }
+
+  /** Green street signs at real intersections, plus pigeons and buskers. */
+  addStreetLife({ g, animated, i, local }, theme) {
+    if (local % 6 === 2) {
+      const list = STREETS[theme];
+      const [a, b, note] = list[Math.floor(i / 6) % list.length];
+      const sign = streetSign(a, b, note || '');
+      const x = { loop: -4.7, millennium: 4.6, riverwalk: 4.6, wrigley: -4.4, lincoln: 4.5 }[theme];
+      sign.position.set(x, theme === 'wrigley' ? 0.18 : 0, -22);
+      g.add(sign);
+    }
+    if (theme !== 'loop' && local % 4 === 1 && this.event !== 'snow') {
+      const flock = pigeons(4 + (i % 3));
+      const side = theme === 'riverwalk' ? 1 : Math.random() < 0.5 ? -1 : 1;
+      flock.obj.position.set(side * rand(5.2, 6.5), theme === 'wrigley' ? 0.18 : 0, -rand(4, 26));
+      animated.push(flock);
+    }
+    if (theme === 'riverwalk' && local % 6 === 4) {
+      const m = busker(i % 2 ? 'sax' : 'guitar');
+      m.position.set(6.6, 0, -18);
+      m.rotation.y = Math.PI / 2;
+      g.add(m);
     }
   }
 
@@ -517,8 +667,12 @@ export class World {
     const water = mesh(G.plane(), this.waterMat, -30, -1.6, -L / 2, 50, L, 1);
     water.rotation.x = -Math.PI / 2;
     g.add(water);
-    // far bank buildings across the river
-    for (let z = 0; z < L; z += 11) {
+    // far bank buildings across the river (Marina City's corncobs once a section)
+    if (local === 7) {
+      const mc = marinaCity();
+      mc.position.set(-62, -1.6, -15);
+      g.add(mc);
+    } else for (let z = 0; z < L; z += 11) {
       const h = rand(18, 50);
       this.building(g, -60, -z - 5, 12, h, 10, pick(['glass', 'stone', 'brick']), pick(['#4a7fb5', '#d9cdb4', '#a2472f', '#5c8fc4']), i * 3 + z, -1.6);
     }
@@ -617,6 +771,12 @@ export class World {
         const brickCol = pick(['#a2472f', '#8f3b2a', '#b5653d', '#7a4a3a', '#c2a27a']);
         const x = s * (8 + 3);
         const b = this.building(g, x, -z - w / 2, 6, h, w, 'brick', brickCol, (i * 13 + z) | 0, 0.18);
+        if (s === -1 && local >= 3 && local <= 6) {
+          // rooftop seats looking into the ballpark across the street
+          const rb = rooftopBleachers();
+          rb.position.set(-9.6, h + 0.6, -z - w / 2);
+          g.add(rb);
+        }
         // ground floor shop
         const [label, col] = pick(SHOPS);
         const face = s * (8 - 0.04);
@@ -677,6 +837,11 @@ export class World {
 
   buildBallpark(g, withSign) {
     const L = CHUNK_LEN;
+    if (!withSign) {
+      const sb = oldScoreboard(this.event);
+      sb.position.set(13.5, 11.4, -15);
+      g.add(sb);
+    }
     const brick = toon(0xffffff, { map: brickTex('#9a3a2a') });
     const green = toon(0x1f5c3a);
     g.add(box(brick, 4, 8, L, 11, 4.1, -L / 2));
@@ -750,6 +915,24 @@ export class World {
         g.add(cyl(toon(0xdddddd), 0.04, 2, x, 1, z));
         g.add(mesh(G.cone(8), toon(pick([0xff6b6b, 0x4dabf7, 0xffd43b, 0x69db7c])), x, 2.1, z, 2.2, 0.6, 2.2));
       }
+    }
+    // sailboats out on the lake, a lifeguard chair, and the zoo
+    if (this.event !== 'snow') {
+      const boat = sailboat();
+      boat.position.set(-rand(30, 70), -0.3, -rand(0, L));
+      boat.rotation.y = rand(-0.4, 0.4);
+      const ph = rand(0, 6);
+      animated.push({ obj: boat, tail: 0, update(dt, t) { boat.position.y = -0.3 + Math.sin(t * 1.6 + ph) * 0.12; boat.rotation.z = Math.sin(t * 1.1 + ph) * 0.06; } });
+      if (local % 5 === 2) {
+        const lg = lifeguardStand();
+        lg.position.set(-13, 0, -12);
+        g.add(lg);
+      }
+    }
+    if (local === 14) {
+      const zoo = zooGiraffes();
+      zoo.position.set(14, 0, -14);
+      g.add(zoo);
     }
     // Conservatory dome once per section
     if (local === 8) {

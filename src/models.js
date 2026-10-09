@@ -153,15 +153,100 @@ export function makeShamrock() {
 
 export const PICKUPS = {
   pizza: { make: makePizza, color: '#ffcf4a', icon: '🍕', name: 'Deep-Dish Pizza', desc: '2× score' },
-  hotdog: { make: makeHotDog, color: '#ff7043', icon: '🌭', name: 'Chicago Hot Dog', desc: 'Speed boost' },
+  hotdog: { make: makeHotDog, color: '#ff7043', icon: '🌭', name: 'Chicago Hot Dog', desc: 'Speed boost (hold the ketchup)' },
   flag: { make: makeFlag, color: '#6ec6f0', icon: '🛡️', name: 'Chicago Flag', desc: 'Shield' },
   coffee: { make: makeCoffee, color: '#a47148', icon: '☕', name: 'Coffee', desc: 'Coin magnet' },
   shamrock: { make: makeShamrock, color: '#23c552', icon: '☘️', name: 'Lucky Shamrock', desc: 'Extra life' },
+  popcorn: { make: makePopcorn, color: '#ffb000', icon: '🍿', name: 'Chicago Mix', desc: 'Cheese + caramel = bonus coins' },
 };
+
+export function makePopcorn() {
+  // A tin of Chicago Mix: half cheese corn, half caramel corn.
+  const g = new THREE.Group();
+  g.add(mesh(G.cyl(16), toon(0xffffff, { map: stripesTex('#0e3386', '#ffffff', 6) }), 0, 0, 0, 0.8, 0.7, 0.8));
+  g.add(mesh(G.cyl(16), toon(0xc8102e), 0, 0.37, 0, 0.84, 0.06, 0.84));
+  const cheese = toon(0xffa51f);
+  const caramel = toon(0xb5651d);
+  for (let i = 0; i < 14; i++) {
+    const a = i * 2.4;
+    const r = 0.1 + (i % 4) * 0.08;
+    g.add(sphere(i % 2 ? cheese : caramel, 0.11, Math.cos(a) * r, 0.45 + (i % 3) * 0.07, Math.sin(a) * r));
+  }
+  return g;
+}
 
 // ---------------------------------------------------------------------------
 // Obstacles
 // ---------------------------------------------------------------------------
+export function makeFestivalBanner(text = 'BLUES FEST') {
+  // Millennium Park festival banner strung low across the path - slide.
+  const g = new THREE.Group();
+  const pole = toon(0x2b2f36);
+  g.add(box(pole, 0.14, 3.2, 0.14, -1.15, 1.6, 0), box(pole, 0.14, 3.2, 0.14, 1.15, 1.6, 0));
+  const sign = new THREE.Mesh(G.box(), [toon(0x0e3386), toon(0x0e3386), toon(0x0e3386), toon(0x0e3386),
+    basic(0xffffff, { map: marqueeTex(text, { bg: '#0e3386', fg: '#ffd34d', bulbs: false, font: 'bold 58px "Arial Black", Impact, sans-serif' }) }),
+    basic(0xffffff, { map: marqueeTex(text, { bg: '#0e3386', fg: '#ffd34d', bulbs: false, font: 'bold 58px "Arial Black", Impact, sans-serif' }) })]);
+  sign.scale.set(2.3, 0.9, 0.08);
+  sign.position.set(0, 1.85, 0);
+  g.add(sign);
+  [-0.9, -0.3, 0.3, 0.9].forEach((x, i) => {
+    const p = mesh(G.cone(3), toon(i % 2 ? 0xe4002b : 0x6ec6f0), x, 1.25, 0, 0.3, 0.3, 0.04);
+    p.rotation.z = Math.PI;
+    g.add(p);
+  });
+  return shadows(g);
+}
+
+export function makeBucketDrummers() {
+  // Street performers drumming on upturned plastic buckets - go around them.
+  const g = new THREE.Group();
+  const skins = [0x8d5524, 0xc68642, 0x5a3825];
+  const shirts = [0xe63946, 0xffffff, 0x0e3386];
+  for (let i = 0; i < 3; i++) {
+    const p = new THREE.Group();
+    p.add(mesh(G.cyl(12, 0.26, 0.22), toon(i === 1 ? 0xff7a1a : 0xf2f2f2), 0, 0.3, 0, 1, 0.6, 1)); // seat bucket
+    p.add(mesh(G.capsule(), toon(shirts[i]), 0, 1.05, 0, 0.44, 0.45, 0.32));
+    p.add(sphere(toon(skins[i]), 0.22, 0, 1.6, 0));
+    p.add(mesh(G.cyl(12, 0.24, 0.2), toon(0xffffff), 0, 0.55, -0.55, 1, 0.5, 1)); // drum bucket
+    p.add(mesh(G.cyl(12, 0.24, 0.2), toon(0xff7a1a), 0.45, 0.4, -0.45, 1, 0.4, 1));
+    for (const x of [-0.18, 0.18]) {
+      const st = box(toon(0xe8d5a8), 0.04, 0.04, 0.5, x, 1.0, -0.35);
+      st.rotation.x = -0.6;
+      p.add(st);
+    }
+    p.position.x = -0.7 + i * 0.7;
+    p.rotation.y = Math.PI + (i - 1) * 0.3;
+    g.add(p);
+  }
+  return shadows(g);
+}
+
+export function makeDibsChair() {
+  // The sacred Chicago "dibs" lawn chair holding a shoveled parking spot - jump.
+  const g = new THREE.Group();
+  const frame = toon(0xb9c2cc);
+  const web = toon(0xffffff, { map: stripesTex('#2f9e44', '#ffd43b', 6) });
+  g.add(box(web, 0.9, 0.06, 0.8, 0, 0.5, 0));
+  const back = box(web, 0.9, 0.8, 0.06, 0, 0.9, 0.42);
+  back.rotation.x = -0.2;
+  g.add(back);
+  for (const x of [-0.45, 0.45]) {
+    const l1 = box(frame, 0.05, 0.75, 0.05, x, 0.37, -0.3);
+    l1.rotation.x = 0.3;
+    const l2 = box(frame, 0.05, 0.75, 0.05, x, 0.37, 0.3);
+    l2.rotation.x = -0.3;
+    g.add(l1, l2, box(frame, 0.05, 0.05, 0.8, x, 0.72, 0));
+  }
+  // a snow heap and an orange cone keep it company
+  g.add(mesh(G.hemi(), toon(0xf4f7fb), 0.75, 0, 0.2, 0.9, 0.8, 0.9));
+  const cone = makeCone();
+  cone.position.set(-0.75, 0, 0);
+  cone.scale.setScalar(0.85);
+  g.add(cone);
+  return shadows(g);
+}
+
+
 export function makeBarricade() {
   // Orange/white striped construction barricade with warning lights — jump.
   const g = new THREE.Group();

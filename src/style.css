@@ -205,6 +205,9 @@ h4 { margin: 14px 0 8px; font-family: var(--title); font-weight: 400; font-size:
 .over-stats b { display: block; font-size: 20px; }
 .over-stats small { color: #5b6478; font-weight: 800; }
 .over-where { font-weight: 800; color: #5b6478; font-size: 14px; }
+.fact { max-width: 34em; margin: 18px auto 0; text-align: center; font-weight: 800; color: #fff; text-shadow: 0 2px 2px rgba(0,0,0,0.35); text-wrap: balance; }
+.over-fact { margin: 0; color: var(--ink); text-shadow: none; font-size: 13px; background: #eef6ff; border: 2px dashed var(--sky); border-radius: 12px; padding: 8px 10px; }
+.over-fact b { display: block; font-family: var(--title); font-weight: 400; color: var(--red); font-size: 15px; }
 .mini-list { display: grid; gap: 6px; text-align: left; }
 .mini-list .mini { font-size: 13px; font-weight: 800; background: #f1f5fb; border-radius: 10px; padding: 6px 10px; }
 .mini-list .mini.done { background: #e6fcf5; }
