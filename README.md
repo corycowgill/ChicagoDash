@@ -22,7 +22,10 @@ npm run build      # bundles Three.js, copies intro/ into dist/
 
 ### Deploying
 
-On [Render](https://render.com), create a **Static Site** from this repo with a blank Build Command and Publish Directory `.`, the same as AlienDigger. Point it at whichever branch holds the game.
+**GitHub Pages:** in the repo on GitHub, open **Settings → Pages**. Under **Build and deployment**, set **Source** to *Deploy from a branch*, **Branch** to `main` and the folder to `/ (root)`, then click **Save**. The game goes live at `https://corycowgill.github.io/ChicagoDash/` within a minute or two. `.nojekyll` tells Pages to serve the files as-is.
+
+
+**Render:** create a **Static Site** from this repo with a blank Build Command and Publish Directory `.`, the same as AlienDigger. Point it at whichever branch holds the game.
 
 ### Controls
 
