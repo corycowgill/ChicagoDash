@@ -53,6 +53,10 @@ npm run preview
   - Resolution drops automatically if the frame rate does.
   - Quality setting: High, Medium or Low (no shadows).
 
+## Studio ident
+
+The game opens with the Hallucinated Games intro. `public/intro/hallucinated-intro.js` is vendored from `gameCentral/intro/` so the game stays a self-contained deploy; re-copy that file to take an update. Click, tap or press any key to skip it, or add `?nointro` to the URL.
+
 ## Code tour
 
 | File | What it does |

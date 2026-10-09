@@ -555,7 +555,8 @@ function boot() {
     origStart();
   };
   window.chicagoDash = game; // handy for debugging in the console
-  setTimeout(() => show('menu'), 300);
+  // Hold the menu until the studio ident finishes (it plays while the scene builds).
+  Promise.resolve(window.__studioIntro).then(() => show('menu'));
   // First interaction unlocks audio on mobile.
   window.addEventListener('pointerdown', () => audio.unlock(), { once: true });
   window.addEventListener('keydown', (e) => {

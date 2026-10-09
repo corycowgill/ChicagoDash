@@ -11,8 +11,27 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/style.css" />
+    <!-- Studio ident. Vendored from gameCentral/intro/hallucinated-intro.js so this
+         game stays a self-contained deploy; re-copy that file to take an update.
+         Plain script, not a module: it defines window.HallucinatedIntro. -->
+    <script src="intro/hallucinated-intro.js"></script>
   </head>
   <body>
+    <!-- Start the ident from a classic script at the top of <body>, not from the
+         module: modules are deferred, which would let the loading screen paint
+         first. main.js awaits window.__studioIntro before showing the menu. -->
+    <script>
+      window.__studioIntro = (function () {
+        try {
+          var q = new URLSearchParams(location.search);
+          if (q.has('nointro') || !window.HallucinatedIntro) return Promise.resolve();
+          // No sound: a cold page load has no user gesture, so a sting would be dropped.
+          return window.HallucinatedIntro.play({ skippable: true, sound: false }).catch(function () {});
+        } catch (e) {
+          return Promise.resolve();
+        }
+      })();
+    </script>
     <canvas id="game"></canvas>
     <div id="touch-layer"></div>
 
