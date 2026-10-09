@@ -1,0 +1,770 @@
+// Procedural Chicago: neighbourhood chunks, the skyline backdrop, sky,
+// lighting and special-event dressing (night, snow, St. Patrick's, game day).
+import * as THREE from 'three';
+import { G, mesh, box, cyl, sphere, bake, disposeObject } from './geo.js';
+import {
+  toon, basic, facadeTiled, trackTex, paverTex, asphaltTex, grassTex, waterTex, brickTex, awningTex,
+  shopSignTex, marqueeTex, verticalChicagoTex, skyTex, setNight,
+} from './materials.js';
+import {
+  makeLampPost, makeTwinLamp, makeBusShelter, makeMailbox, makeFlowerPlanter, makeTree, makeParkedBike,
+  makeBalustrade, makeRailing, makeWaterTaxi, makeTourBoat, makePennantString, makeFan, makeTrain, makeBench,
+} from './models.js';
+
+export const LANE_W = 2.4;
+export const LANES = [-LANE_W, 0, LANE_W];
+export const CHUNK_LEN = 30;
+export const SECTION_LEN = 750; // metres per neighbourhood
+const AHEAD = 270;
+
+export const THEMES = [
+  { id: 'loop', name: 'The Loop', tag: 'Race the "L" between the skyscrapers' },
+  { id: 'riverwalk', name: 'The Riverwalk', tag: 'Bridges, boats and the Chicago River' },
+  { id: 'wrigley', name: 'Wrigleyville', tag: 'Game day energy on Clark & Addison' },
+  { id: 'lincoln', name: 'Lincoln Park', tag: 'Lakefront trail with skyline views' },
+];
+
+export function themeIndexAt(dist) {
+  return Math.floor(Math.max(0, dist) / SECTION_LEN) % THEMES.length;
+}
+
+export const EVENTS = {
+  day: { name: 'Sunny Day', icon: '☀️' },
+  night: { name: 'Night Run', icon: '🌙' },
+  snow: { name: 'Winter Storm', icon: '❄️' },
+  stpats: { name: "St. Patrick's Day", icon: '☘️' },
+  gameday: { name: 'Cubs Game Day', icon: '⚾' },
+};
+
+export function autoEvent(date = new Date()) {
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  const h = date.getHours();
+  if (m === 3 && d >= 10 && d <= 20) return 'stpats';
+  if (m === 12 || m <= 2) return 'snow';
+  if (h >= 19 || h < 6) return 'night';
+  if (m >= 4 && m <= 9 && (date.getDay() === 0 || date.getDay() === 6)) return 'gameday';
+  return 'day';
+}
+
+function rand(a, b) {
+  return a + Math.random() * (b - a);
+}
+function pick(arr) {
+  return arr[(Math.random() * arr.length) | 0];
+}
+
+const STATIONS = ['Clark/Lake', 'State/Lake', 'Washington/Wabash', 'Adams/Wabash', 'Quincy', 'LaSalle/Van Buren', 'Harold Washington Library', 'Merchandise Mart'];
+const SHOPS = [
+  ['PIZZA', '#c0392b'], ['TAVERN', '#1d3557'], ['HOT DOGS', '#e9a400'], ['SPORTS BAR', '#0e3386'],
+  ['ITALIAN BEEF', '#2f6b2f'], ['RECORDS', '#6a3fa0'], ['BAGELS', '#b5651d'], ['DINER', '#d6336c'],
+  ['TACOS', '#e8590c'], ['COFFEE', '#6f4e37'], ['POPCORN', '#e03131'], ['BOOKS', '#2b8a3e'],
+];
+
+export class World {
+  constructor(scene, quality = 'high') {
+    this.scene = scene;
+    this.quality = quality;
+    this.chunks = new Map();
+    this.animated = [];
+    this.event = 'day';
+    this.time = 0;
+    this.nextChunk = 0;
+
+    this.root = new THREE.Group();
+    scene.add(this.root);
+
+    this.setupLights();
+    this.buildSkyline();
+    this.buildSnow();
+    this.applyEvent('day');
+  }
+
+  // -------------------------------------------------------------------------
+  setupLights() {
+    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x6b5a4a, 1.1);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+    this.sun.position.set(-12, 30, 10);
+    this.sun.castShadow = this.quality !== 'low';
+    const s = this.sun.shadow;
+    s.mapSize.set(this.quality === 'high' ? 2048 : 1024, this.quality === 'high' ? 2048 : 1024);
+    s.camera.left = -14;
+    s.camera.right = 14;
+    s.camera.top = 30;
+    s.camera.bottom = -14;
+    s.camera.near = 1;
+    s.camera.far = 80;
+    s.bias = -0.0008;
+    s.normalBias = 0.03;
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
+    // Glow that follows the runner at night.
+    this.playerLight = new THREE.PointLight(0xffe2a8, 0, 18, 1.6);
+    this.scene.add(this.playerLight);
+    this.scene.fog = new THREE.Fog(0xbfe3ff, 60, 230);
+  }
+
+  applyEvent(ev) {
+    this.event = ev;
+    const night = ev === 'night';
+    const snow = ev === 'snow';
+    let sky;
+    if (night) sky = skyTex('#060b24', '#1b2350', '#3b3a6b');
+    else if (snow) sky = skyTex('#9fb1c8', '#d3dbe6', '#eef2f7');
+    else if (ev === 'stpats') sky = skyTex('#2b8fe8', '#8fd0ff', '#e6fff0');
+    else sky = skyTex('#2b7de9', '#7cc4ff', '#fff2d6');
+    this.scene.background = sky;
+    this.scene.fog.color.set(night ? 0x1d2148 : snow ? 0xdfe6ee : ev === 'stpats' ? 0xd6f5e6 : 0xcfe9ff);
+    this.scene.fog.near = snow ? 30 : 60;
+    this.scene.fog.far = snow ? 160 : 240;
+    this.hemi.intensity = night ? 0.55 : snow ? 1.3 : 1.15;
+    this.hemi.color.set(night ? 0x6b7bd6 : 0xcfe8ff);
+    this.sun.intensity = night ? 0.35 : snow ? 1.2 : 2.3;
+    this.sun.color.set(night ? 0x8fa2ff : 0xfff1d6);
+    this.playerLight.intensity = night ? 25 : 0;
+    setNight(night);
+    this.snow.visible = snow;
+    this.stars.visible = night;
+    this.moon.visible = night;
+    this.sunDisc.visible = !night && !snow;
+    const water = ev === 'stpats' ? '#19c25a' : night ? '#173a6b' : '#2f8fd8';
+    this.waterMat.map = waterTex(water);
+    this.waterMat.needsUpdate = true;
+    this.lakeMat.map = waterTex(ev === 'stpats' ? '#2fbf6a' : night ? '#14305a' : '#3aa0e8');
+    this.lakeMat.needsUpdate = true;
+    for (const m of this.skylineMats) m.color.copy(m.userData.base).multiplyScalar(night ? 0.45 : 1);
+    for (const m of this.skylineWin) m.opacity = night ? 1 : 0;
+  }
+
+  // -------------------------------------------------------------------------
+  buildSkyline() {
+    // A far-off backdrop that travels with the runner so the skyline always
+    // looms on the horizon. Materials ignore fog so it stays crisp.
+    const g = new THREE.Group();
+    this.skylineMats = [];
+    this.skylineWin = [];
+    const mk = (hex) => {
+      const m = new THREE.MeshToonMaterial({ color: hex, fog: false });
+      m.userData.base = new THREE.Color(hex);
+      this.skylineMats.push(m);
+      return m;
+    };
+    const winMat = new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0, fog: false });
+    this.skylineWin.push(winMat);
+    const dark = mk(0x3c4a63);
+    const mid = mk(0x5e7591);
+    const light = mk(0x8fa9c7);
+    const silver = mk(0xb7c6d6);
+    const white = mk(0xdfe7ef);
+    const add = (mat, w, h, d, x, z, y0 = 0) => {
+      const b = box(mat, w, h, d, x, y0 + h / 2, z);
+      g.add(b);
+      return b;
+    };
+    const winStrip = (w, h, x, z, y0 = 0) => {
+      // a few lit window bands visible at night
+      for (let y = y0 + 4; y < y0 + h - 2; y += 6) {
+        const s = box(winMat, w * 1.01, 0.7, 0.2, x, y, z + 0.1);
+        g.add(s);
+      }
+    };
+    // Generic towers
+    for (let i = 0; i < 46; i++) {
+      const x = (i - 23) * 9 + rand(-3, 3);
+      if (Math.abs(x) < 10) continue;
+      const h = rand(25, 85) * (1 - Math.abs(x) / 320);
+      const w = rand(6, 11);
+      const z = rand(-30, 20);
+      const m = pick([dark, mid, light, light, mid]);
+      add(m, w, h, 6, x, z);
+      if (Math.random() < 0.6) winStrip(w, h, x, z + 3);
+      if (Math.random() < 0.3) add(m, w * 0.6, h * 0.25, 4, x, z, h);
+    }
+    // Willis-style tower: stacked black tubes + twin antennas
+    const willis = mk(0x1f2633);
+    const wx = -38;
+    add(willis, 12, 120, 12, wx, -20);
+    add(willis, 8, 145, 8, wx - 2, -20);
+    add(willis, 4, 160, 4, wx + 2, -20);
+    add(willis, 0.6, 22, 0.6, wx - 1, -20, 160);
+    add(willis, 0.6, 18, 0.6, wx + 3, -20, 160);
+    winStrip(12, 120, wx, -14);
+    // Trump-style silver stepped tower
+    add(silver, 10, 90, 8, 30, -10);
+    add(silver, 7, 110, 6, 30, -10);
+    add(silver, 4, 125, 4, 30, -10);
+    add(silver, 0.5, 20, 0.5, 30, -10, 125);
+    // Aon white slab
+    add(white, 11, 128, 11, 6, -35);
+    winStrip(11, 128, 6, -29.5);
+    // Hancock tapered black + antennas
+    const hancock = new THREE.Mesh(new THREE.CylinderGeometry(5, 8.5, 130, 4, 1), willis);
+    hancock.rotation.y = Math.PI / 4;
+    hancock.position.set(62, 65, -25);
+    g.add(hancock);
+    add(willis, 0.6, 24, 0.6, 60, -25, 130);
+    add(willis, 0.6, 24, 0.6, 64, -25, 130);
+    // Aqua-ish wavy
+    add(mk(0x9fd3c7), 9, 80, 9, -70, 0);
+    // 311 South Wacker crown
+    add(mid, 10, 85, 10, -12, -5);
+    const crown = new THREE.Mesh(G.cyl(16), mk(0xe8eef5));
+    crown.scale.set(6, 12, 6);
+    crown.position.set(-12, 91, -5);
+    g.add(crown);
+
+    // Merge the static towers into a few meshes (one per material).
+    const towers = bake(g);
+    g.clear();
+    g.add(towers);
+
+    // Clouds
+    const cloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, fog: false });
+    this.skylineMats.push(Object.assign(cloudMat, { userData: { base: new THREE.Color(0xffffff) } }));
+    this.clouds = new THREE.Group();
+    for (let i = 0; i < 9; i++) {
+      const c = new THREE.Group();
+      for (let j = 0; j < 5; j++) c.add(sphere(cloudMat, rand(5, 9), j * 6 - 12, rand(-1, 2), rand(-2, 2)));
+      c.position.set(rand(-220, 220), rand(120, 175), rand(-60, -20));
+      c.scale.y = 0.55;
+      this.clouds.add(c);
+    }
+    this.clouds = bake(this.clouds);
+    g.add(this.clouds);
+
+    // Sun / moon / stars
+    this.sunDisc = new THREE.Mesh(G.sphere(), new THREE.MeshBasicMaterial({ color: 0xfff3b0, fog: false }));
+    this.sunDisc.scale.setScalar(26);
+    this.sunDisc.position.set(-150, 160, -80);
+    g.add(this.sunDisc);
+    this.moon = new THREE.Mesh(G.sphere(), new THREE.MeshBasicMaterial({ color: 0xf4f1d8, fog: false }));
+    this.moon.scale.setScalar(16);
+    this.moon.position.set(120, 170, -80);
+    g.add(this.moon);
+    const starGeo = new THREE.BufferGeometry();
+    const sp = [];
+    for (let i = 0; i < 400; i++) sp.push(rand(-500, 500), rand(90, 320), rand(-120, -60));
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, fog: false, sizeAttenuation: false }));
+    g.add(this.stars);
+
+    // Water / lake materials (shared by chunks)
+    this.waterMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: waterTex('#2f8fd8') });
+    this.lakeMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: waterTex('#3aa0e8') });
+
+    g.position.y = -12;
+    this.skyline = g;
+    this.scene.add(g);
+  }
+
+  buildSnow() {
+    const n = this.quality === 'low' ? 600 : 1500;
+    const geo = new THREE.BufferGeometry();
+    const p = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      p[i * 3] = rand(-30, 30);
+      p[i * 3 + 1] = rand(0, 25);
+      p[i * 3 + 2] = rand(-80, 10);
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    this.snow = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0.9 }));
+    this.snow.frustumCulled = false;
+    this.snow.visible = false;
+    this.scene.add(this.snow);
+  }
+
+  // -------------------------------------------------------------------------
+  reset() {
+    for (const c of this.chunks.values()) this.removeChunk(c);
+    this.chunks.clear();
+    for (const a of this.animated) this.removeAnimated(a);
+    this.animated = [];
+    this.nextChunk = 0;
+  }
+
+  update(dt, playerZ, camera) {
+    this.time += dt;
+    // spawn ahead
+    while (-this.nextChunk * CHUNK_LEN > playerZ - AHEAD) {
+      this.spawnChunk(this.nextChunk++);
+    }
+    // remove behind
+    for (const [i, c] of this.chunks) {
+      if (-(i + 1) * CHUNK_LEN > playerZ + 25) {
+        this.removeChunk(c);
+        this.chunks.delete(i);
+      }
+    }
+    // Moving scenery outlives its chunk; drop it once it is behind the runner.
+    for (let k = this.animated.length - 1; k >= 0; k--) {
+      const a = this.animated[k];
+      a.update(dt, this.time, playerZ);
+      if (a.obj.position.z - (a.tail ?? 0) > playerZ + 30) {
+        this.removeAnimated(a);
+        this.animated.splice(k, 1);
+      }
+    }
+    this.skyline.position.z = playerZ - 330;
+    this.clouds.position.x = (this.time * 2) % 80;
+    // water flow
+    this.waterMat.map.offset.y = (this.time * 0.15) % 1;
+    this.lakeMat.map.offset.x = (this.time * 0.03) % 1;
+    // shadow camera follows the runner
+    this.sun.position.set(-12, 30, playerZ + 6);
+    this.sun.target.position.set(0, 0, playerZ - 8);
+    this.playerLight.position.set(0, 5, playerZ - 3);
+    if (this.snow.visible) {
+      const pos = this.snow.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) - dt * (3 + (i % 5));
+        let x = pos.getX(i) + Math.sin(this.time + i) * dt * 0.8;
+        if (y < 0) y += 25;
+        pos.setXY(i, x, y);
+      }
+      pos.needsUpdate = true;
+      this.snow.position.set(0, 0, camera.position.z - 20);
+    }
+  }
+
+  removeChunk(c) {
+    this.root.remove(c.group);
+    disposeObject(c.group);
+  }
+
+  removeAnimated(a) {
+    this.root.remove(a.obj);
+    disposeObject(a.obj);
+  }
+
+  spawnChunk(i) {
+    const z0 = -i * CHUNK_LEN;
+    const dist = i * CHUNK_LEN;
+    const ti = themeIndexAt(dist);
+    const theme = THEMES[ti].id;
+    const local = Math.floor((dist % SECTION_LEN) / CHUNK_LEN); // chunk index within the section
+    const g = new THREE.Group();
+    const animated = [];
+    const ctx = { g, animated, i, local, z0 };
+    if (theme === 'loop') this.buildLoop(ctx);
+    else if (theme === 'riverwalk') this.buildRiverwalk(ctx);
+    else if (theme === 'wrigley') this.buildWrigley(ctx);
+    else this.buildLincoln(ctx);
+    if (local === 0 && i > 0) this.buildGateway(ctx, THEMES[ti].name);
+    if (this.event === 'gameday' && (theme === 'wrigley' || theme === 'loop') && i % 2 === 0) {
+      const p = makePennantString(theme === 'loop' ? 9 : 15);
+      p.position.z = -12;
+      g.add(p);
+    }
+    const baked = bake(g);
+    baked.position.z = z0;
+    this.root.add(baked);
+    for (const a of animated) {
+      a.obj.position.z += z0;
+      this.root.add(a.obj);
+      this.animated.push(a);
+    }
+    this.chunks.set(i, { group: baked });
+  }
+
+  // -------------------------------------------------------------------------
+  // Shared builders
+  ground(g, mat, width, x = 0, y = 0, len = CHUNK_LEN) {
+    const p = mesh(G.plane(), mat, x, y, -len / 2, width, len, 1);
+    p.rotation.x = -Math.PI / 2;
+    p.receiveShadow = true;
+    g.add(p);
+    return p;
+  }
+
+  building(g, x, z, w, h, d, style, color, seed, baseY = 0) {
+    // A handful of facade variants per colour keeps textures + materials shared;
+    // the street-facing side (depth d) sets the window tiling.
+    const f = facadeTiled(style, color, Math.abs(seed | 0) % 3, d, h);
+    const mat = toon(0xffffff, { map: f.map, emissive: 0xffffff, emissiveMap: f.emissiveMap, emissiveIntensity: 0, nightGlow: 0.6 });
+    const roof = toon(style === 'glass' ? 0x5c7896 : 0x6b6f78);
+    const b = new THREE.Mesh(G.box(), [mat, mat, roof, roof, mat, mat]);
+    b.scale.set(w, h, d);
+    b.position.set(x, baseY + h / 2, z);
+    g.add(b);
+    // cornice / rooftop details
+    if (style !== 'glass') g.add(box(toon(0xe9e2d0), w + 0.3, 0.4, d + 0.3, x, baseY + h + 0.2, z));
+    if (Math.random() < 0.4) g.add(box(toon(0x8a8f99), w * 0.3, 1.2, d * 0.3, x + rand(-w / 4, w / 4), baseY + h + 0.6, z)); // HVAC
+    if (Math.random() < 0.25) {
+      // rooftop water tower — very Chicago
+      const tx = x + rand(-w / 4, w / 4);
+      g.add(cyl(toon(0x8b5a2b), 0.9, 1.6, tx, baseY + h + 2.2, z));
+      g.add(mesh(G.cone(10), toon(0x5c3b1e), tx, baseY + h + 3.4, z, 2.0, 0.8, 2.0));
+      for (const [dx, dz] of [[-0.6, -0.6], [0.6, -0.6], [-0.6, 0.6], [0.6, 0.6]]) g.add(box(toon(0x333333), 0.08, 1.4, 0.08, tx + dx, baseY + h + 0.7, z + dz));
+    }
+    return b;
+  }
+
+  buildGateway(ctx, name) {
+    const { g } = ctx;
+    const steel = toon(0x1d3557);
+    const z = -4;
+    g.add(box(steel, 0.5, 7.5, 0.5, -4.6, 3.75, z), box(steel, 0.5, 7.5, 0.5, 4.6, 3.75, z));
+    g.add(box(steel, 9.8, 0.4, 0.5, 0, 7.4, z));
+    const sign = new THREE.Mesh(G.plane(), basic(0xffffff, { map: marqueeTex(name.toUpperCase(), { sub: 'WELCOME TO', bg: '#c8102e', w: 512, h: 128, font: 'bold 54px "Arial Black", Impact, sans-serif' }) }));
+    sign.scale.set(8, 2, 1);
+    sign.position.set(0, 6.2, z + 0.3);
+    g.add(sign);
+    for (let x = -4; x <= 4; x += 1) g.add(sphere(toon(0xfff2a8, { emissive: 0xffe08a, emissiveIntensity: 0.5, nightGlow: 2.5 }), 0.1, x, 7.65, z + 0.2));
+  }
+
+  // -------------------------------------------------------------------------
+  // THE LOOP — elevated tracks among skyscrapers
+  buildLoop({ g, animated, i, local }) {
+    const L = CHUNK_LEN;
+    // gravel deck
+    this.ground(g, toon(this.event === 'snow' ? 0xdfe3e8 : 0x7a6e62), 10);
+    // three tracks
+    const tie = toon(0xffffff, { map: trackTex() });
+    const rail = toon(0xb9c2cc);
+    for (const x of LANES) {
+      this.ground(g, tie, 2.0, x, 0.01);
+      g.add(box(rail, 0.1, 0.12, L, x - 0.55, 0.07, -L / 2), box(rail, 0.1, 0.12, L, x + 0.55, 0.07, -L / 2));
+    }
+    // elevated structure: green steel girders on each side
+    const green = toon(0x2f4f3a);
+    const greenDark = toon(0x203a2a);
+    for (const s of [-1, 1]) {
+      g.add(box(green, 0.5, 0.9, L, s * 5.2, 0.1, -L / 2));
+      for (let z = 0; z < L; z += 5) {
+        g.add(box(greenDark, 0.4, 0.9, 0.4, s * 5.2, 0.9, -z));
+        g.add(box(greenDark, 0.6, 14, 0.6, s * 5.0, -7, -z)); // columns down to the street
+        const brace = box(greenDark, 0.2, 3.5, 0.2, s * 4.4, -1.8, -z - 1.2);
+        brace.rotation.z = s * 0.6;
+        g.add(brace);
+      }
+      g.add(box(green, 0.12, 0.12, L, s * 5.2, 1.35, -L / 2)); // handrail
+    }
+    // the street far below
+    this.ground(g, toon(0x55595f), 60, 0, -12);
+    // outer tracks on extended deck, sometimes with a train racing alongside
+    for (const s of [-1, 1]) {
+      this.ground(g, toon(0x6e6458), 3.6, s * 7.3, -0.05);
+      g.add(box(rail, 0.1, 0.12, L, s * 7.3 - 0.55, 0.02, -L / 2), box(rail, 0.1, 0.12, L, s * 7.3 + 0.55, 0.02, -L / 2));
+      g.add(box(green, 0.4, 0.5, L, s * 9.3, 0.2, -L / 2));
+    }
+    if (i % 4 === 2) {
+      // Always slower than the runner, so you overtake it.
+      const s = Math.random() < 0.5 ? -1 : 1;
+      const train = makeTrain(4, 11);
+      train.rotation.y = Math.PI;
+      train.position.set(s * 7.3, 0, -10);
+      const speed = rand(8, 12.5);
+      animated.push({
+        obj: train,
+        tail: 50,
+        update(dt) {
+          train.position.z -= dt * speed;
+        },
+      });
+    }
+    // skyscrapers rising from the street on both sides
+    for (const s of [-1, 1]) {
+      let z = 0;
+      while (z < L) {
+        const d = rand(8, 13);
+        const w = rand(8, 13);
+        const h = rand(22, 55);
+        const style = pick(['glass', 'stone', 'glass', 'dark', 'brick']);
+        const col = style === 'glass' ? pick(['#4a7fb5', '#5c8fc4', '#3d6d9e']) : style === 'brick' ? pick(['#9c4a33', '#b5653d']) : style === 'dark' ? '#2e3442' : pick(['#d9cdb4', '#c8bfae', '#e6dcc8']);
+        this.building(g, s * (11 + w / 2 + rand(0, 3)), -z - d / 2, w, h, d, style, col, (i * 7 + z) | 0, -12);
+        z += d + rand(0.5, 2);
+      }
+    }
+    // Chicago Theatre marquee once per section
+    if (local === 6) {
+      const s = 1;
+      const sign = new THREE.Mesh(G.box(), [toon(0xd4202a), toon(0xd4202a), toon(0xd4202a), toon(0xd4202a), basic(0xffffff, { map: verticalChicagoTex() }), basic(0xffffff, { map: verticalChicagoTex() })]);
+      sign.scale.set(0.8, 9, 1.6);
+      sign.rotation.y = Math.PI / 2;
+      sign.position.set(s * 10.6, 6, -15);
+      g.add(sign);
+      g.add(box(toon(0xd9b45a), 0.8, 2.2, 7, s * 10.6, 0.6, -15));
+    }
+    // station sign
+    if (local % 5 === 3) {
+      const name = STATIONS[(i / 5 | 0) % STATIONS.length];
+      const t = signTexCached(name);
+      for (const s of [-1, 1]) {
+        g.add(box(toon(0x2b2f36), 0.12, 3.2, 0.12, s * 4.8, 1.6, -8));
+        const p = new THREE.Mesh(G.plane(), basic(0xffffff, { map: t }));
+        p.scale.set(2.4, 0.5, 1);
+        p.position.set(s * 4.8, 3.0, -7.92);
+        g.add(p);
+        // platform canopy
+        g.add(box(toon(0x8b2a2a), 2.2, 0.15, 10, s * 7.3, 3.8, -8));
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // RIVERWALK — river on the left, bridges overhead
+  buildRiverwalk({ g, animated, i, local }) {
+    const L = CHUNK_LEN;
+    const snow = this.event === 'snow';
+    this.ground(g, toon(0xffffff, { map: paverTex(snow ? '#e4e2de' : '#cdbfa6') }), 9);
+    this.ground(g, toon(0xffffff, { map: paverTex(snow ? '#f2f2f2' : '#b8a888') }), 6, 7.5);
+    // river wall + water
+    g.add(box(toon(0xa59f94), 1.0, 2.0, L, -5.0, -0.95, -L / 2));
+    const railing = makeRailing(L, 0x2b2f36);
+    railing.position.set(-4.7, 0, -L / 2);
+    g.add(railing);
+    const water = mesh(G.plane(), this.waterMat, -30, -1.6, -L / 2, 50, L, 1);
+    water.rotation.x = -Math.PI / 2;
+    g.add(water);
+    // far bank buildings across the river
+    for (let z = 0; z < L; z += 11) {
+      const h = rand(18, 50);
+      this.building(g, -60, -z - 5, 12, h, 10, pick(['glass', 'stone', 'brick']), pick(['#4a7fb5', '#d9cdb4', '#a2472f', '#5c8fc4']), i * 3 + z, -1.6);
+    }
+    // right side: planters, lamps, benches, then building facades
+    for (let z = 3; z < L; z += 10) {
+      const p = makeFlowerPlanter(2.2);
+      p.position.set(5.6, 0, -z);
+      g.add(p);
+      const lamp = makeTwinLamp();
+      lamp.position.set(4.8, 0, -z - 5);
+      g.add(lamp);
+    }
+    for (let z = 0; z < L; ) {
+      const d = rand(9, 13);
+      const w = 10;
+      const h = rand(14, 40);
+      this.building(g, 15 + rand(0, 2), -z - d / 2, w, h, d, pick(['stone', 'glass', 'brick']), pick(['#e6dcc8', '#c8bfae', '#5c8fc4', '#b5653d']), i * 11 + z | 0);
+      z += d + 0.6;
+    }
+    // bascule bridge every third chunk, spanning river and path
+    if (local % 3 === 1) {
+      const z = -14;
+      const red = toon(0x8b2a2a);
+      const redD = toon(0x6e1f1f);
+      g.add(box(red, 60, 0.9, 6, -18, 7.5, z));
+      g.add(box(toon(0x55595f), 60, 0.3, 5.8, -18, 8.05, z));
+      for (const dz of [-2.9, 2.9]) {
+        g.add(box(red, 60, 0.2, 0.25, -18, 9.4, z + dz));
+        for (let x = -46; x <= 10; x += 2.4) {
+          const d = box(redD, 0.15, 2.1, 0.15, x, 8.6, z + dz);
+          d.rotation.z = (x / 2.4) % 2 ? 0.7 : -0.7;
+          g.add(d);
+        }
+      }
+      // bridge tender houses
+      for (const bx of [-6.5, 8.5]) {
+        g.add(box(toon(0xe8dcc4), 3, 11, 3, bx, 4.0, z + 5));
+        g.add(mesh(G.cone(4), toon(0x5c6b5e), bx, 10.3, z + 5, 4.2, 2, 4.2));
+        g.children.at(-1).rotation.y = Math.PI / 4;
+        for (let y = 2; y < 9; y += 2.5) g.add(box(toon(0x2c3e57, { emissive: 0xffd27a, emissiveIntensity: 0, nightGlow: 0.8 }), 0.8, 1.2, 3.05, bx, y, z + 5));
+      }
+      // pillars on the riverbank
+      g.add(box(toon(0xa59f94), 1.5, 9, 6, -5.6, 3, z));
+      g.add(box(toon(0xa59f94), 1.5, 9, 6, 7.2, 3, z));
+    }
+    // boats
+    if (i % 2 === 0) {
+      // dir 1 = cruising the same way as the runner, -1 = oncoming
+      const boat = Math.random() < 0.6 ? makeWaterTaxi() : makeTourBoat();
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      boat.position.set(dir > 0 ? -10 : -16, -1.6, -rand(0, L));
+      if (dir > 0) boat.rotation.y = Math.PI; // bow (+Z in the model) faces travel direction
+      const sp = rand(4, 9);
+      animated.push({
+        obj: boat,
+        tail: 10,
+        update(dt, t) {
+          boat.position.z -= dt * sp * dir;
+          boat.position.y = -1.6 + Math.sin(t * 2 + sp) * 0.08;
+        },
+      });
+    }
+    if (this.event === 'stpats' && i % 2 === 1) {
+      // green bunting across the path
+      const p = makePennantString(10, [0x1fa64a, 0xffffff, 0xff8c1a]);
+      p.position.set(0, 0, -6);
+      g.add(p);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // WRIGLEYVILLE — storefronts, the ballpark, game-day crowds
+  buildWrigley({ g, animated, i, local }) {
+    const L = CHUNK_LEN;
+    this.ground(g, toon(0xffffff, { map: asphaltTex() }), 7.6);
+    const curb = toon(0xb9b2a5);
+    const walk = toon(0xffffff, { map: paverTex(this.event === 'snow' ? '#f0f0f0' : '#d7d1c4') });
+    for (const s of [-1, 1]) {
+      g.add(box(curb, 0.3, 0.2, L, s * 3.95, 0.1, -L / 2));
+      const w = mesh(G.plane(), walk, s * 6.0, 0.18, -L / 2, 4, L, 1);
+      w.rotation.x = -Math.PI / 2;
+      w.receiveShadow = true;
+      g.add(w);
+    }
+    const isWrigley = local === 4 || local === 5;
+    for (const s of [-1, 1]) {
+      if (isWrigley && s === 1) {
+        this.buildBallpark(g, local === 4);
+        continue;
+      }
+      // storefront row
+      let z = 0;
+      while (z < L) {
+        const w = rand(6, 8);
+        const h = rand(9, 14);
+        const brickCol = pick(['#a2472f', '#8f3b2a', '#b5653d', '#7a4a3a', '#c2a27a']);
+        const x = s * (8 + 3);
+        const b = this.building(g, x, -z - w / 2, 6, h, w, 'brick', brickCol, (i * 13 + z) | 0, 0.18);
+        // ground floor shop
+        const [label, col] = pick(SHOPS);
+        const face = s * (8 - 0.04);
+        g.add(box(toon(0x9cc9e8, { emissive: 0xffd27a, emissiveIntensity: 0, nightGlow: 0.7 }), 0.1, 2.2, w - 1.2, face, 1.4, -z - w / 2));
+        g.add(box(toon(0x3b2a20), 0.12, 2.4, 0.9, face, 1.3, -z - w + 0.9)); // door
+        const aw = mesh(G.box(), toon(0xffffff, { map: awningTex(col, '#ffffff') }), s * 7.5, 3.0, -z - w / 2, 1.2, 0.12, w - 0.6);
+        aw.rotation.z = s * -0.45;
+        g.add(aw);
+        const sign = new THREE.Mesh(G.plane(), basic(0xffffff, { map: shopSignTex(label, col) }));
+        sign.scale.set(w - 1.5, 0.8, 1);
+        sign.rotation.y = -s * Math.PI / 2;
+        sign.position.set(face - s * 0.03, 3.9, -z - w / 2);
+        g.add(sign);
+        z += w + 0.2;
+      }
+    }
+    for (let z = 4; z < L; z += 12) {
+      for (const s of [-1, 1]) {
+        const lamp = makeLampPost({ banner: true, wflag: this.event === 'gameday' });
+        lamp.position.set(s * 4.5, 0.18, -z);
+        if (s < 0) lamp.rotation.y = Math.PI;
+        g.add(lamp);
+      }
+    }
+    if (Math.random() < 0.7) {
+      const mb = makeMailbox();
+      mb.position.set(-5.2, 0.18, -rand(6, 24));
+      mb.rotation.y = Math.PI / 2;
+      g.add(mb);
+    }
+    if (Math.random() < 0.6) {
+      for (let k = 0; k < 3; k++) {
+        const b = makeParkedBike();
+        b.position.set(5.6, 0.18, -10 - k * 0.8);
+        b.rotation.y = Math.PI / 2;
+        g.add(b);
+      }
+    }
+    if (Math.random() < 0.4) {
+      const sh = makeBusShelter();
+      sh.position.set(-6.2, 0.18, -20);
+      sh.rotation.y = Math.PI / 2;
+      g.add(sh);
+    }
+    if (this.event === 'gameday' || isWrigley) {
+      // fans on the sidewalks
+      const cols = [0x0e3386, 0x0e3386, 0xcc3433, 0xffffff];
+      const n = this.event === 'gameday' ? 8 : 3;
+      for (let k = 0; k < n; k++) {
+        const f = makeFan(pick(cols));
+        const s = Math.random() < 0.5 ? -1 : 1;
+        f.position.set(s * rand(5, 7), 0.18, -rand(0, L));
+        f.rotation.y = rand(-1, 1) + (s > 0 ? -Math.PI / 2 : Math.PI / 2);
+        g.add(f);
+      }
+    }
+  }
+
+  buildBallpark(g, withSign) {
+    const L = CHUNK_LEN;
+    const brick = toon(0xffffff, { map: brickTex('#9a3a2a') });
+    const green = toon(0x1f5c3a);
+    g.add(box(brick, 4, 8, L, 11, 4.1, -L / 2));
+    // arched windows
+    for (let z = 2; z < L; z += 3) {
+      g.add(box(toon(0x1f3d2b), 0.1, 2.6, 1.8, 8.98, 3.2, -z));
+    }
+    // upper deck steel + green
+    g.add(box(green, 6, 3, L, 13, 9.6, -L / 2));
+    g.add(box(toon(0xe8eef5), 6.2, 0.3, L, 13, 11.2, -L / 2));
+    for (let z = 0; z < L; z += 4) g.add(box(green, 0.3, 4, 0.3, 9.2, 10, -z));
+    // light towers peeking above
+    for (const z of [6, 22]) {
+      g.add(box(toon(0x8a96a3), 0.4, 14, 0.4, 16, 13, -z));
+      g.add(box(toon(0xe8eef5, { emissive: 0xffffff, emissiveIntensity: 0.2, nightGlow: 2 }), 3.5, 1.6, 0.4, 16, 20.5, -z));
+    }
+    if (withSign) {
+      // The famous red marquee on its pole
+      const red = toon(0xc8102e);
+      g.add(box(toon(0x2b2f36), 0.35, 6, 0.35, 7.2, 3, -18));
+      const sign = new THREE.Mesh(G.box(), [red, red, red, red,
+        basic(0xffffff, { map: marqueeTex('WRIGLEY FIELD', { sub: 'HOME OF CHICAGO CUBS', w: 512, h: 160, font: 'bold 62px "Arial Black", Impact, sans-serif' }) }), red]);
+      sign.scale.set(6, 2.2, 0.5);
+      sign.position.set(7.2, 6.8, -17.5);
+      g.add(sign);
+      const sub = new THREE.Mesh(G.plane(), basic(0xffffff, { map: marqueeTex('GAME TODAY', { bg: '#0e3386', bulbs: false, font: 'bold 60px "Arial Black", Impact, sans-serif' }) }));
+      sub.scale.set(4.4, 0.9, 1);
+      sub.position.set(7.2, 5.1, -17.24);
+      g.add(sub);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // LINCOLN PARK — lakefront trail
+  buildLincoln({ g, animated, i, local }) {
+    const L = CHUNK_LEN;
+    this.ground(g, toon(0xe1d9c8), 8.2);
+    const grass = toon(0xffffff, { map: grassTex(this.event === 'snow' ? '#e9eef3' : '#6cc04a') });
+    this.ground(g, grass, 20, 14, -0.02);
+    this.ground(g, grass, 4, -6, -0.02);
+    // beach + lake on the left
+    this.ground(g, toon(this.event === 'snow' ? 0xf2f2f2 : 0xf3dfa6), 10, -13, -0.05);
+    const lake = mesh(G.plane(), this.lakeMat, -120, -0.3, -L / 2, 200, L, 1);
+    lake.rotation.x = -Math.PI / 2;
+    g.add(lake);
+    // trail edge
+    for (const s of [-1, 1]) g.add(box(toon(0xc7bda8), 0.2, 0.1, L, s * 4.15, 0.05, -L / 2));
+    // trees
+    for (let z = 2; z < L; z += rand(4, 7)) {
+      const t = makeTree(rand(0.9, 1.4), this.event === 'snow' ? 0xe6eef5 : pick([0x3fae49, 0x4caf50, 0x2f9e44, 0x66bb6a]));
+      t.position.set(rand(7, 18), 0, -z);
+      g.add(t);
+    }
+    for (let z = 5; z < L; z += 15) {
+      const t = makeTree(rand(0.8, 1.1), this.event === 'snow' ? 0xe6eef5 : 0x3fae49);
+      t.position.set(-6.5, 0, -z);
+      g.add(t);
+      const lamp = makeLampPost({ banner: false });
+      lamp.position.set(4.9, 0, -z - 7);
+      g.add(lamp);
+      const b = makeBench();
+      b.position.set(5.6, 0, -z - 3);
+      b.rotation.y = -Math.PI / 2;
+      g.add(b);
+    }
+    // beach umbrellas
+    if (this.event !== 'snow' && this.event !== 'night') {
+      for (let k = 0; k < 2; k++) {
+        const x = rand(-16, -10);
+        const z = -rand(0, L);
+        g.add(cyl(toon(0xdddddd), 0.04, 2, x, 1, z));
+        g.add(mesh(G.cone(8), toon(pick([0xff6b6b, 0x4dabf7, 0xffd43b, 0x69db7c])), x, 2.1, z, 2.2, 0.6, 2.2));
+      }
+    }
+    // Conservatory dome once per section
+    if (local === 8) {
+      const glass = toon(0xcfeeea, { opacity: 0.85 });
+      g.add(box(toon(0xe8eef5), 12, 3, 8, 22, 1.5, -15));
+      g.add(mesh(G.hemi(), glass, 22, 3, -15, 8, 7, 8));
+      g.add(mesh(G.hemi(), glass, 17, 3, -15, 4, 4, 4), mesh(G.hemi(), glass, 27, 3, -15, 4, 4, 4));
+    }
+  }
+}
+
+const stationTexCache = new Map();
+function signTexCached(name) {
+  if (!stationTexCache.has(name)) {
+    stationTexCache.set(name, marqueeTex(name, { bg: '#1b2735', fg: '#ffffff', bulbs: false, font: 'bold 50px Arial, sans-serif' }));
+  }
+  return stationTexCache.get(name);
+}

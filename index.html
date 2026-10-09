@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0e3386" />
+    <meta name="description" content="Chicago Dash: Run the City — a colorful 3D endless runner through the Loop, the Riverwalk, Wrigleyville and Lincoln Park." />
+    <title>Chicago Dash: Run the City</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23fff'/%3E%3Crect y='14' width='64' height='8' fill='%236ec6f0'/%3E%3Crect y='42' width='64' height='8' fill='%236ec6f0'/%3E%3Cpath fill='%23e4002b' d='M32 22l3 6 6.5-.5-3.7 5.5 3.7 5.5L35 38l-3 6-3-6-6.5.5 3.7-5.5-3.7-5.5L29 28z'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="touch-layer"></div>
+
+    <!-- Loading -->
+    <div id="loading" class="screen show">
+      <div class="logo small"><span class="logo-top">CHICAGO</span><span class="logo-bottom">DASH</span></div>
+      <div class="loader"><div></div></div>
+    </div>
+
+    <!-- Main menu -->
+    <div id="menu" class="screen">
+      <div class="topbar">
+        <div class="wallet"><span class="coin-ico"></span><b id="menu-coins">0</b></div>
+        <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
+      </div>
+      <div class="menu-main">
+        <div class="menu-top">
+        <div class="logo">
+          <span class="logo-top">CHICAGO</span>
+          <span class="logo-bottom">DASH</span>
+          <span class="logo-tag">★ RUN THE CITY ★</span>
+        </div>
+        <div class="best">Best <b id="menu-best">0</b> · <b id="menu-bestdist">0</b> m</div>
+        </div>
+        <div class="menu-bottom">
+        <button class="btn btn-play" id="btn-play">▶ RUN!</button>
+        <div class="event-picker" id="event-picker"></div>
+        <div class="menu-grid">
+          <button class="btn btn-tile" data-open="runners"><span>🏃</span>Runners</button>
+          <button class="btn btn-tile" data-open="upgrades"><span>⚡</span>Upgrades</button>
+          <button class="btn btn-tile" data-open="challenges"><span>📅</span>Daily<i class="badge" id="daily-badge"></i></button>
+          <button class="btn btn-tile" data-open="trophies"><span>🏆</span>Trophies</button>
+        </div>
+        <div class="controls-hint">
+          <span class="desk">⬅ ➡ change lanes · ⬆ / Space jump · ⬇ slide · P pause</span>
+          <span class="mob">Swipe ⬅ ➡ to switch lanes · swipe ⬆ to jump · swipe ⬇ to slide</span>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Runners / character shop -->
+    <div id="runners" class="screen panel-screen">
+      <div class="panel side">
+        <div class="panel-head"><button class="back" data-back>‹</button><h2>Runners</h2><div class="wallet"><span class="coin-ico"></span><b class="coins-live">0</b></div></div>
+        <div class="runner-nav">
+          <button class="nav-arrow" id="runner-prev">‹</button>
+          <div class="runner-info">
+            <h3 id="runner-name"></h3>
+            <p id="runner-blurb"></p>
+            <div class="runner-tag" id="runner-tag"></div>
+          </div>
+          <button class="nav-arrow" id="runner-next">›</button>
+        </div>
+        <div class="dots" id="runner-dots"></div>
+        <h4>Outfits</h4>
+        <div class="outfits" id="runner-outfits"></div>
+        <button class="btn btn-primary" id="runner-action">Select</button>
+      </div>
+    </div>
+
+    <!-- Upgrades -->
+    <div id="upgrades" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><button class="back" data-back>‹</button><h2>Upgrades</h2><div class="wallet"><span class="coin-ico"></span><b class="coins-live">0</b></div></div>
+        <div id="upgrade-list" class="list"></div>
+        <div class="power-legend">
+          <div>🍕 <b>Deep-dish pizza</b> doubles your score</div>
+          <div>🌭 <b>Chicago hot dog</b> speed boost — smash through obstacles</div>
+          <div>🛡️ <b>Chicago flag</b> blocks one collision</div>
+          <div>☕ <b>Coffee</b> pulls in nearby coins</div>
+          <div>☘️ <b>Lucky shamrock</b> grants an extra life</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Daily challenges -->
+    <div id="challenges" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><button class="back" data-back>‹</button><h2>Daily Challenges</h2></div>
+        <p class="muted" id="daily-reset"></p>
+        <div id="challenge-list" class="list"></div>
+      </div>
+    </div>
+
+    <!-- Achievements -->
+    <div id="trophies" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><button class="back" data-back>‹</button><h2>Trophies</h2><span class="muted" id="trophy-count"></span></div>
+        <div id="trophy-list" class="trophy-grid"></div>
+        <div class="stats" id="stats"></div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="settings" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><button class="back" data-back>‹</button><h2>Settings</h2></div>
+        <div class="list">
+          <label class="row"><span>🔊 Sound effects</span><input type="checkbox" id="set-sound" /></label>
+          <label class="row"><span>🎵 Music</span><input type="checkbox" id="set-music" /></label>
+          <label class="row"><span>🖥️ Graphics</span>
+            <select id="set-quality"><option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low (fastest)</option></select>
+          </label>
+          <div class="row"><span>🗑️ Progress</span><button class="btn btn-small btn-danger" id="set-reset">Reset save</button></div>
+        </div>
+        <p class="muted small">Graphics changes to shadows apply after reloading the page.</p>
+        <h4>How to play</h4>
+        <ul class="howto">
+          <li><b>Keyboard:</b> ← → / A D change lanes, ↑ / W / Space jump, ↓ / S slide (or fast-fall in the air), P / Esc pause.</li>
+          <li><b>Touch:</b> swipe left / right / up / down. Tap to jump.</li>
+          <li>Run up the ramps onto CTA trains and hop across their roofs.</li>
+          <li>Swerving into the side of something bounces you back — hitting it head-on costs a heart.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div class="hud-top">
+        <button class="icon-btn pause" id="btn-pause">⏸</button>
+        <div class="hud-pill"><span class="coin-ico"></span><b id="hud-coins">0</b></div>
+        <div class="hud-pill"><b id="hud-dist">0</b><small>m</small></div>
+        <div class="hud-score"><small>SCORE</small><b id="hud-score">0</b><i id="hud-mult">×2</i></div>
+      </div>
+      <div class="hud-left">
+        <div class="hearts" id="hud-hearts"></div>
+        <div class="powers" id="hud-powers"></div>
+      </div>
+      <div class="banner" id="banner"><small id="banner-sub">NOW ENTERING</small><b id="banner-title"></b><span id="banner-tag"></span></div>
+      <div class="toasts" id="toasts"></div>
+      <div class="tutorial hidden" id="tutorial">
+        <div class="tut-card">
+          <div class="desk"><kbd>←</kbd><kbd>→</kbd> lanes &nbsp; <kbd>↑</kbd> jump &nbsp; <kbd>↓</kbd> slide</div>
+          <div class="mob">Swipe ← → lanes · ↑ jump · ↓ slide</div>
+          <small>Grab coins · dodge the city · ride the "L"</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div id="pause" class="screen dim">
+      <div class="card">
+        <h2>Paused</h2>
+        <button class="btn btn-primary" id="btn-resume">▶ Resume</button>
+        <button class="btn" id="btn-quit">Quit to menu</button>
+      </div>
+    </div>
+
+    <!-- Game over -->
+    <div id="over" class="screen dim">
+      <div class="card over-card">
+        <div class="over-title" id="over-title">Game Over</div>
+        <div class="newbest hidden" id="over-newbest">★ NEW HIGH SCORE ★</div>
+        <div class="over-score" id="over-score">0</div>
+        <div class="over-stats">
+          <div><b id="over-dist">0</b><small>metres</small></div>
+          <div><b id="over-coins">0</b><small>coins</small></div>
+          <div><b id="over-best">0</b><small>best</small></div>
+        </div>
+        <div class="over-where" id="over-where"></div>
+        <div id="over-daily" class="mini-list"></div>
+        <button class="btn btn-revive hidden" id="btn-revive"></button>
+        <button class="btn btn-play" id="btn-again">↻ Run Again</button>
+        <button class="btn" id="btn-menu">Menu</button>
+      </div>
+    </div>
+
+    <div class="popups" id="popups"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
