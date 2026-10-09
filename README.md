@@ -4,17 +4,25 @@ A colorful, fast-paced 3D endless runner through Chicago, built with Three.js an
 
 ## Play
 
+The repo root is a working static site with no build step, like the other Hallucinated Games: serve it with any static file server (ES modules will not load from `file://`).
+
+```bash
+python -m http.server 8765    # then open http://localhost:8765/
+```
+
+Three.js (r170, MIT) is vendored in `vendor/three/` and resolved through an import map in `index.html`.
+
+For development with hot reload, or a bundled build in `dist/`:
+
 ```bash
 npm install
 npm run dev        # http://localhost:5173
+npm run build      # bundles Three.js, copies intro/ into dist/
 ```
 
-Production build (static files in `dist/`, works from any host or sub-path):
+### Deploying
 
-```bash
-npm run build
-npm run preview
-```
+On [Render](https://render.com), create a **Static Site** from this repo with a blank Build Command and Publish Directory `.`, the same as AlienDigger. Point it at whichever branch holds the game.
 
 ### Controls
 
@@ -55,7 +63,7 @@ npm run preview
 
 ## Studio ident
 
-The game opens with the Hallucinated Games intro. `public/intro/hallucinated-intro.js` is vendored from `gameCentral/intro/` so the game stays a self-contained deploy; re-copy that file to take an update. Click, tap or press any key to skip it, or add `?nointro` to the URL.
+The game opens with the Hallucinated Games intro. `intro/hallucinated-intro.js` is vendored from `gameCentral/intro/` so the game stays a self-contained deploy; re-copy that file to take an update. Click, tap or press any key to skip it, or add `?nointro` to the URL.
 
 ## Code tour
 

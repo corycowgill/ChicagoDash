@@ -10,7 +10,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="src/style.css" />
+    <!-- No build step needed: the repo root is a working static site, like the
+         other Hallucinated Games. Three.js is vendored (r170, MIT) and resolved
+         through this import map. `npm run build` bundles it instead. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/three.module.min.js",
+          "three/examples/jsm/utils/BufferGeometryUtils.js": "./vendor/three/BufferGeometryUtils.js"
+        }
+      }
+    </script>
     <!-- Studio ident. Vendored from gameCentral/intro/hallucinated-intro.js so this
          game stays a self-contained deploy; re-copy that file to take an update.
          Plain script, not a module: it defines window.HallucinatedIntro. -->
@@ -201,6 +212,6 @@
     </div>
 
     <div class="popups" id="popups"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="src/main.js"></script>
   </body>
 </html>
