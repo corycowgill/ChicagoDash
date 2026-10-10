@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { G, mesh, box, sphere, shadows } from './geo.js';
 import { toon, basic, signTex, chicagoFlagTex } from './materials.js';
+import { Q } from './quality.js';
 
 function letterTex(text, fg, bg = null, font = 'bold 96px "Arial Black", Impact, sans-serif', w = 128, h = 128) {
   return signTex(`letter-${text}-${fg}-${bg}-${w}`, w, h, (g) => {
@@ -84,14 +85,15 @@ export function buildCharacter(id, outfitIdx = 0) {
   const o = def.outfits[outfitIdx] || def.outfits[0];
   const isBear = id === 'bear';
   const skinCol = { kid: 0xf1c27d, explorer: 0xffd3a8, southside: 0x8d5524, bear: 0x9c6b3e }[id];
-  const skin = toon(skinCol);
-  const hoodie = isBear && o.hoodie !== 0x0e3386 ? toon(o.hoodie === 0xffffff ? 0xffffff : o.hoodie, { map: pinstripeTex() }) : toon(o.hoodie);
-  const pants = toon(o.pants);
-  const shoe = toon(o.shoe);
-  const sole = toon(0xf2f2f2);
-  const accent = toon(o.accent);
-  const cap = toon(o.cap);
-  const dark = toon(0x1a1a1a);
+  // Fabric is matte, skin has a soft sheen, sneakers and caps a little gloss.
+  const skin = toon(skinCol, { roughness: isBear ? 0.95 : 0.55 });
+  const hoodie = isBear && o.hoodie !== 0x0e3386 ? toon(o.hoodie === 0xffffff ? 0xffffff : o.hoodie, { map: pinstripeTex(), roughness: 0.9 }) : toon(o.hoodie, { roughness: 0.92 });
+  const pants = toon(o.pants, { roughness: 0.9 });
+  const shoe = toon(o.shoe, { roughness: 0.45 });
+  const sole = toon(0xf2f2f2, { roughness: 0.6 });
+  const accent = toon(o.accent, { roughness: 0.4 });
+  const cap = toon(o.cap, { roughness: 0.7 });
+  const dark = toon(0x1a1a1a, { roughness: 0.2 });
   const white = basic(0xffffff);
 
   const root = new THREE.Group();
@@ -129,6 +131,9 @@ export function buildCharacter(id, outfitIdx = 0) {
     // hood up handled on head
   } else if (!isBear) {
     torso.add(mesh(G.torus(0.2, 0.08, 12), hoodie, 0, 0.62, 0.04, 1, 1, 1));
+    // drawstrings and a kangaroo pocket
+    for (const x of [-0.07, 0.07]) torso.add(mesh(G.cyl(8), toon(0xf4f4f4), x, 0.48, -0.22, 0.025, 0.2, 0.025));
+    torso.add(mesh(G.rboxSized(0.34, 0.14, 0.04, 0.03), hoodie, 0, 0.18, -0.215));
     torso.children.at(-1).rotation.x = Math.PI / 2;
   }
   // Backpack
@@ -153,6 +158,16 @@ export function buildCharacter(id, outfitIdx = 0) {
     for (const x of [-0.12, 0.12]) {
       head.add(sphere(white, 0.075, x, 0.03, -headR + 0.04));
       head.add(sphere(dark, 0.045, x, 0.03, -headR - 0.005));
+      head.add(sphere(white, 0.014, x + 0.015, 0.05, -headR - 0.045)); // catch-light
+      if (!isBear) {
+        const brow = mesh(G.rboxSized(0.1, 0.022, 0.03, 0.01), toon(id === 'explorer' ? 0x6b3e1f : 0x3b2a20), x, 0.12, -headR + 0.02);
+        brow.rotation.z = x > 0 ? -0.15 : 0.15;
+        head.add(brow);
+      }
+    }
+    if (!isBear) {
+      head.add(mesh(G.sphere(12, 10), skin, 0, -0.03, -headR - 0.01, 0.07, 0.06, 0.07)); // nose
+      for (const x of [-headR, headR]) head.add(mesh(G.sphere(12, 10), skin, x, 0, 0.02, 0.09, 0.14, 0.07)); // ears
     }
   }
   // smile
@@ -172,6 +187,14 @@ export function buildCharacter(id, outfitIdx = 0) {
   if (id !== 'southside') {
     const capG = new THREE.Group();
     capG.add(mesh(G.hemi(), cap, 0, 0.05, 0, headR * 2.1, headR * 1.7, headR * 2.1));
+    capG.add(mesh(G.sphere(10, 8), cap, 0, 0.05 + headR * 0.85, 0, 0.07, 0.04, 0.07)); // button
+    for (let k = 0; k < 6; k++) {
+      const seam = mesh(G.torus(headR * 1.04, 0.004, 24), toon(0x000000, { opacity: 0.25 }), 0, 0.05, 0);
+      seam.rotation.set(Math.PI / 2, 0, (k / 6) * Math.PI);
+      seam.rotation.order = 'ZXY';
+      seam.scale.y = 0.8;
+      if (Q.seg > 1) capG.add(seam);
+    }
     capG.add(box(id === 'explorer' ? toon(0x6ec6f0) : cap, 0.42, 0.04, 0.3, 0, 0.07, -headR - 0.08)); // brim
     capG.children.at(-1).rotation.x = -0.15;
     const logo = new THREE.Mesh(G.plane(), id === 'explorer'
@@ -232,9 +255,12 @@ export function buildCharacter(id, outfitIdx = 0) {
     const foot = new THREE.Group();
     foot.position.y = -0.36;
     knee.add(foot);
-    foot.add(box(shoe, 0.2, 0.14, 0.34, 0, -0.02, -0.06));
-    foot.add(box(sole, 0.21, 0.05, 0.36, 0, -0.1, -0.06));
-    foot.add(box(accent, 0.21, 0.05, 0.2, 0, 0.0, -0.04));
+    // rounded sneaker: upper, toe cap, midsole, swoosh stripe and laces
+    foot.add(mesh(G.rboxSized(0.2, 0.15, 0.34, 0.06), shoe, 0, -0.02, -0.06));
+    foot.add(mesh(G.sphere(14, 10), shoe, 0, -0.04, -0.21, 0.2, 0.12, 0.14));
+    foot.add(mesh(G.rboxSized(0.22, 0.06, 0.38, 0.03), sole, 0, -0.1, -0.06));
+    foot.add(mesh(G.rboxSized(0.215, 0.04, 0.2, 0.015), accent, 0, 0.0, -0.04));
+    for (let k = 0; k < 3; k++) foot.add(mesh(G.rboxSized(0.1, 0.012, 0.025, 0.006), toon(0xffffff), 0, 0.058, -0.1 + k * 0.05));
     legs.push({ hip, knee, s });
   }
   shadows(root, true, false);

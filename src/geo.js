@@ -1,7 +1,9 @@
 // Geometry helpers: cached primitive geometries + tiny mesh builders, and a
 // "bake" utility that merges static meshes per material to keep draw calls low.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { Q, segs } from './quality.js';
 
 const geoCache = new Map();
 function cached(key, make) {
@@ -17,15 +19,40 @@ function cached(key, make) {
 export const G = {
   box: () => cached('box', () => new THREE.BoxGeometry(1, 1, 1)),
   cyl: (seg = 12, top = 0.5, bottom = 0.5) =>
-    cached(`cyl-${seg}-${top}-${bottom}`, () => new THREE.CylinderGeometry(top, bottom, 1, seg)),
-  sphere: (w = 14, h = 10) => cached(`sph-${w}-${h}`, () => new THREE.SphereGeometry(0.5, w, h)),
-  hemi: () => cached('hemi', () => new THREE.SphereGeometry(0.5, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2)),
-  cone: (seg = 12) => cached(`cone-${seg}`, () => new THREE.ConeGeometry(0.5, 1, seg)),
+    cached(`cyl-${seg}-${top}-${bottom}`, () => new THREE.CylinderGeometry(top, bottom, 1, segs(seg))),
+  sphere: (w = 14, h = 10) => cached(`sph-${w}-${h}`, () => new THREE.SphereGeometry(0.5, segs(w), segs(h))),
+  hemi: () => cached('hemi', () => new THREE.SphereGeometry(0.5, segs(16), segs(8), 0, Math.PI * 2, 0, Math.PI / 2)),
+  cone: (seg = 12) => cached(`cone-${seg}`, () => new THREE.ConeGeometry(0.5, 1, seg <= 4 ? seg : segs(seg))),
   plane: () => cached('plane', () => new THREE.PlaneGeometry(1, 1)),
-  torus: (r = 0.5, t = 0.12, seg = 16) => cached(`torus-${r}-${t}-${seg}`, () => new THREE.TorusGeometry(r, t, 8, seg)),
-  capsule: () => cached('capsule', () => new THREE.CapsuleGeometry(0.5, 1, 4, 10)),
+  torus: (r = 0.5, t = 0.12, seg = 16) => cached(`torus-${r}-${t}-${seg}`, () => new THREE.TorusGeometry(r, t, segs(8), segs(seg))),
+  capsule: () => cached('capsule', () => new THREE.CapsuleGeometry(0.5, 1, segs(5), segs(12))),
+  /** Unit box with rounded edges; radius is in unit-box space, so scale evenly-ish. */
+  rbox: (r = 0.12) => cached(`rbox-${r}`, () => new RoundedBoxGeometry(1, 1, 1, Math.max(2, Math.round(2 * Q.seg)), r)),
+  /** Rounded box at a real size, so the edge radius is not distorted by scaling. */
+  rboxSized: (w, h, d, r) =>
+    cached(`rboxs-${w}-${h}-${d}-${r}`, () => new RoundedBoxGeometry(w, h, d, Math.max(2, Math.round(2 * Q.seg)), Math.min(r, w / 2, h / 2, d / 2))),
+  /** Lathe from a 2D profile of [radius, y] points. */
+  lathe: (key, pts, seg = 24) => cached(`lathe-${key}`, () => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), segs(seg))),
+  /** Lumpy leaf cluster: a subdivided icosahedron with jittered vertices. */
+  foliage: (seed = 1) =>
+    cached(`foliage-${seed}`, () => {
+      // weld the polyhedron's split vertices so the canopy shades smoothly
+      const g = mergeVertices(new THREE.IcosahedronGeometry(0.5, Q.seg >= 2 ? 3 : Q.seg > 1 ? 2 : 1).deleteAttribute('uv').deleteAttribute('normal'));
+      const p = g.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        const n = Math.sin(v.x * 9 + seed) * Math.cos(v.y * 11 + seed * 2) * Math.sin(v.z * 7 + seed * 3);
+        v.multiplyScalar(1 + n * 0.16);
+        p.setXYZ(i, v.x, v.y, v.z);
+      }
+      g.computeVertexNormals();
+      // bake() expects uvs on everything
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(p.count * 2), 2));
+      return g;
+    }),
   wedge: (theta = Math.PI / 4) =>
-    cached(`wedge-${theta}`, () => new THREE.CylinderGeometry(1, 1, 1, 10, 1, false, 0, theta)),
+    cached(`wedge-${theta}`, () => new THREE.CylinderGeometry(1, 1, 1, segs(10), 1, false, 0, theta)),
   ramp: () =>
     cached('ramp', () => {
       // Unit right-triangle prism: rises from z=+0.5 (y=0) to z=-0.5 (y=1).

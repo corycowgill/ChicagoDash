@@ -1,7 +1,8 @@
 // Pooled particle bursts: coin sparkles, power-up rings and obstacle "poofs".
 import * as THREE from 'three';
 import { G } from './geo.js';
-import { toon, basic } from './materials.js';
+import { toon, basic, sparkleTex, glowTex } from './materials.js';
+import { Q } from './quality.js';
 
 export class FX {
   constructor(scene) {
@@ -9,6 +10,60 @@ export class FX {
     this.parts = [];
     this.pool = [];
     this.rings = [];
+    this.lines = [];
+    this.linePool = [];
+    this.lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.sparkleMat = new THREE.SpriteMaterial({ map: sparkleTex(), color: 0xfff2b0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.sparkles = [];
+    this.dusts = [];
+  }
+
+  /** Soft dust puff kicked up by sneakers. */
+  dust(pos, n = 2, big = false) {
+    if (!this.dustMat) this.dustMat = new THREE.SpriteMaterial({ map: glowTex(), color: 0xcfc4b0, transparent: true, depthWrite: false, opacity: 0.5 });
+    const count = Math.max(1, Math.round(n * Q.particles));
+    for (let i = 0; i < count; i++) {
+      const s = new THREE.Sprite(this.dustMat.clone());
+      s.position.copy(pos);
+      s.userData = { v: new THREE.Vector3((Math.random() - 0.5) * (big ? 3 : 1), Math.random() * (big ? 1.2 : 0.6), Math.random() * 1.5), life: big ? 0.7 : 0.45, max: big ? 0.7 : 0.45, size: big ? 1.1 : 0.6 };
+      s.scale.setScalar(0.2);
+      this.scene.add(s);
+      this.dusts.push(s);
+    }
+  }
+
+  /** Four-point twinkle that pops and fades (coins, power-ups). */
+  twinkle(pos, scale = 0.9) {
+    const s = new THREE.Sprite(this.sparkleMat);
+    s.position.copy(pos);
+    s.userData.life = 0.35;
+    s.userData.scale = scale;
+    s.scale.setScalar(0.01);
+    this.scene.add(s);
+    this.sparkles.push(s);
+  }
+
+  /** Streaks rushing past the camera at high speed. intensity 0..1. */
+  speedLines(dt, camera, intensity) {
+    if (intensity > 0.02 && Math.random() < intensity * 1.6 * Q.particles) {
+      let m = this.linePool.pop();
+      if (!m) m = new THREE.Mesh(G.box(), this.lineMat);
+      const a = Math.random() * Math.PI * 2;
+      const r = 2.2 + Math.random() * 3.5;
+      m.position.set(camera.position.x + Math.cos(a) * r, Math.max(0.3, camera.position.y - 1 + Math.sin(a) * r * 0.7), camera.position.z - 30 - Math.random() * 10);
+      m.scale.set(0.025, 0.025, 2 + Math.random() * 3);
+      this.scene.add(m);
+      this.lines.push(m);
+    }
+    for (let i = this.lines.length - 1; i >= 0; i--) {
+      const m = this.lines[i];
+      m.position.z += dt * 80;
+      if (m.position.z > camera.position.z + 1) {
+        this.scene.remove(m);
+        this.linePool.push(m);
+        this.lines.splice(i, 1);
+      }
+    }
   }
 
   get(mat, geo) {
@@ -74,6 +129,32 @@ export class FX {
   }
 
   update(dt) {
+    for (let i = this.dusts.length - 1; i >= 0; i--) {
+      const s = this.dusts[i];
+      const u = s.userData;
+      u.life -= dt;
+      if (u.life <= 0) {
+        this.scene.remove(s);
+        s.material.dispose();
+        this.dusts.splice(i, 1);
+        continue;
+      }
+      const k = 1 - u.life / u.max;
+      s.position.addScaledVector(u.v, dt);
+      s.scale.setScalar(0.2 + u.size * k);
+      s.material.opacity = 0.45 * (1 - k);
+    }
+    for (let i = this.sparkles.length - 1; i >= 0; i--) {
+      const s = this.sparkles[i];
+      s.userData.life -= dt;
+      const k = s.userData.life / 0.35;
+      s.scale.setScalar(Math.sin(k * Math.PI) * s.userData.scale);
+      s.material.rotation = k * 2;
+      if (s.userData.life <= 0) {
+        this.scene.remove(s);
+        this.sparkles.splice(i, 1);
+      }
+    }
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i];
       p.userData.life -= dt;
@@ -103,6 +184,18 @@ export class FX {
   }
 
   clear() {
+    for (const s of this.sparkles) this.scene.remove(s);
+    this.sparkles = [];
+    for (const s of this.dusts) {
+      this.scene.remove(s);
+      s.material.dispose();
+    }
+    this.dusts = [];
+    for (const m of this.lines) {
+      this.scene.remove(m);
+      this.linePool.push(m);
+    }
+    this.lines = [];
     for (const p of this.parts) {
       this.scene.remove(p);
       this.pool.push(p);

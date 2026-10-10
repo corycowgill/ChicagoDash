@@ -4,8 +4,9 @@ import * as THREE from 'three';
 import { G, mesh, box, cyl, sphere, shadows } from './geo.js';
 import {
   toon, basic, chicagoFlagTex, coinFaceTex, stripesTex, trainFrontTex, trainSideTex,
-  shelterAdTex, marqueeTex, wFlagTex,
+  shelterAdTex, marqueeTex, wFlagTex, nightGlowMat,
 } from './materials.js';
+import { Q, segs } from './quality.js';
 
 const C = {
   orange: 0xff7a1a, white: 0xf7f7f2, red: 0xe63946, black: 0x23252b, steel: 0x8a96a3,
@@ -18,10 +19,10 @@ const C = {
 // ---------------------------------------------------------------------------
 const coinGeo = {};
 function getCoinGeo() {
-  // One geometry + one material per coin: the caps sample the star face on the
-  // left half of the texture atlas, the rim samples the solid gold right half.
+  // One geometry per coin: the caps sample the star face on the left half of
+  // the texture atlas, the rim samples the solid gold right half.
   if (coinGeo.g) return coinGeo.g;
-  const g = new THREE.CylinderGeometry(0.5, 0.5, 1, 20);
+  const g = new THREE.CylinderGeometry(0.5, 0.5, 1, segs(20));
   const uv = g.attributes.uv;
   const seen = new Set();
   for (const grp of g.groups) {
@@ -39,12 +40,27 @@ function getCoinGeo() {
   return g;
 }
 
+const coinMats = {};
+function coinMaterial(green) {
+  if (coinMats[green]) return coinMats[green];
+  const tex = coinFaceTex(green);
+  coinMats[green] = Q.pbr
+    ? new THREE.MeshStandardMaterial({ map: tex, metalness: 0.85, roughness: 0.25, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.35, envMapIntensity: 1.6 })
+    : basic(0xffffff, { map: tex });
+  return coinMats[green];
+}
+
 export function makeCoin(green = false) {
-  const m = new THREE.Mesh(getCoinGeo(), basic(0xffffff, { map: coinFaceTex(green) }));
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(getCoinGeo(), coinMaterial(green));
   m.rotation.x = Math.PI / 2;
   m.scale.set(0.9, 0.14, 0.9);
-  const g = new THREE.Group();
   g.add(m);
+  if (Q.pbr) {
+    // raised milled rim catches the light as the coin spins
+    const rim = new THREE.Mesh(G.torus(0.45, 0.045, 28), coinMaterial(green));
+    g.add(rim);
+  }
   return g;
 }
 
@@ -248,31 +264,37 @@ export function makeDibsChair() {
 
 
 export function makeBarricade() {
-  // Orange/white striped construction barricade with warning lights — jump.
+  // Orange/white striped construction barricade with flashing lamps — jump.
   const g = new THREE.Group();
-  const stripe = toon(0xffffff, { map: stripesTex('#ff6a00', '#ffffff', 5) });
-  const leg = toon(C.white);
-  g.add(box(stripe, 2.0, 0.32, 0.12, 0, 0.82, 0));
-  g.add(box(stripe, 2.0, 0.32, 0.12, 0, 0.36, 0));
+  const stripe = toon(0xffffff, { map: stripesTex('#ff6a00', '#ffffff', 5), roughness: 0.35 });
+  const leg = toon(C.white, { roughness: 0.5 });
+  g.add(mesh(G.rboxSized(2.0, 0.32, 0.12, 0.04), stripe, 0, 0.82, 0));
+  g.add(mesh(G.rboxSized(2.0, 0.32, 0.12, 0.04), stripe, 0, 0.36, 0));
   for (const x of [-0.85, 0.85]) {
-    const l = box(leg, 0.1, 1.05, 0.1, x, 0.5, 0.15);
-    l.rotation.x = 0.18;
-    const l2 = box(leg, 0.1, 1.05, 0.1, x, 0.5, -0.15);
-    l2.rotation.x = -0.18;
-    g.add(l, l2);
-    g.add(sphere(toon(0xffa500, { emissive: 0xff8800, emissiveIntensity: 0.6, nightGlow: 2 }), 0.09, x, 1.08, 0));
+    for (const s of [1, -1]) {
+      const l = mesh(G.rboxSized(0.1, 1.05, 0.1, 0.03), leg, x, 0.5, s * 0.15);
+      l.rotation.x = s * 0.18;
+      g.add(l);
+    }
+    g.add(mesh(G.rboxSized(0.12, 0.06, 0.6, 0.02), toon(0x444444), x, 0.03, 0)); // feet
+    // amber warning lamp in a black housing
+    g.add(mesh(G.cyl(16), toon(0x222222), x, 1.05, 0, 0.2, 0.08, 0.2));
+    g.add(mesh(G.sphere(16, 12), toon(0xffa500, { emissive: 0xff8800, emissiveIntensity: 1.2, nightGlow: 3, roughness: 0.2 }), x, 1.12, 0, 0.18, 0.14, 0.18));
+    const halo = mesh(G.plane(), nightGlowMat(0xffa040, 1.2), x, 1.12, 0.06, 0.9, 0.9, 1);
+    g.add(halo);
   }
   return shadows(g);
 }
 
 export function makeCone() {
+  // Smooth lathed traffic cone with retro-reflective collars on a square base.
   const g = new THREE.Group();
-  const o = toon(C.orange);
-  const w = toon(C.white);
-  g.add(box(toon(0xd9480f), 0.75, 0.08, 0.75, 0, 0.04, 0));
-  g.add(mesh(G.cyl(14, 0.08, 0.32), o, 0, 0.5, 0, 1, 0.9, 1));
-  g.add(mesh(G.cyl(14, 0.19, 0.24), w, 0, 0.45, 0, 1.01, 0.14, 1.01));
-  g.add(mesh(G.cyl(14, 0.12, 0.16), w, 0, 0.7, 0, 1.01, 0.1, 1.01));
+  const prof = [[0.001, 0.98], [0.05, 0.96], [0.08, 0.9], [0.31, 0.08], [0.33, 0.06], [0.001, 0.06]];
+  g.add(mesh(G.rboxSized(0.74, 0.07, 0.74, 0.04), toon(0xc93d0b, { roughness: 0.6 }), 0, 0.035, 0));
+  g.add(mesh(G.lathe('cone', prof, 24), toon(C.orange, { roughness: 0.45 }), 0, 0, 0));
+  const band = toon(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.15, roughness: 0.25 });
+  g.add(mesh(G.cyl(24, 0.215, 0.255), band, 0, 0.42, 0, 1.0, 0.12, 1.0));
+  g.add(mesh(G.cyl(24, 0.135, 0.165), band, 0, 0.66, 0, 1.0, 0.08, 1.0));
   return shadows(g);
 }
 
@@ -289,15 +311,18 @@ export function makeConeRow() {
 }
 
 export function makeTrashCan() {
+  // Ribbed black City of Chicago litter can with a domed lid — jump.
   const g = new THREE.Group();
-  const body = toon(0x2d3136);
-  g.add(mesh(G.cyl(14, 0.42, 0.36), body, 0, 0.5, 0, 1, 1, 1));
-  g.add(mesh(G.cyl(14, 0.46, 0.46), toon(0x1c1f23), 0, 1.02, 0, 1, 0.08, 1));
-  g.add(mesh(G.hemi(), toon(0x1c1f23), 0, 1.05, 0, 0.9, 0.25, 0.9));
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2;
-    g.add(box(toon(0x3d434a), 0.05, 0.85, 0.05, Math.cos(a) * 0.4, 0.5, Math.sin(a) * 0.4));
+  const prof = [[0.001, 0], [0.36, 0], [0.4, 0.05]];
+  for (let i = 0; i < 6; i++) {
+    const y = 0.08 + i * 0.15;
+    prof.push([0.4, y], [0.43, y + 0.04], [0.43, y + 0.09], [0.4, y + 0.13]);
   }
+  prof.push([0.42, 0.98], [0.001, 0.98]);
+  g.add(mesh(G.lathe('trash', prof, 24), toon(0x2d3136, { roughness: 0.45, metalness: 0.4 }), 0, 0, 0));
+  g.add(mesh(G.cyl(24), toon(0x1c1f23, { roughness: 0.4, metalness: 0.5 }), 0, 1.0, 0, 0.94, 0.06, 0.94));
+  g.add(mesh(G.hemi(), toon(0x1c1f23, { roughness: 0.4, metalness: 0.5 }), 0, 1.02, 0, 0.86, 0.28, 0.86));
+  g.add(mesh(G.rboxSized(0.24, 0.05, 0.05, 0.02), toon(0x8a96a3, { metalness: 0.8, roughness: 0.3 }), 0, 1.18, 0)); // handle
   const pair = new THREE.Group();
   const a = shadows(g);
   a.position.x = -0.45;
@@ -354,31 +379,51 @@ export function makeOverheadBar(kind = 'construction') {
 
 export const TRAIN_H = 2.7;
 export function makeTrain(cars = 1, carLen = 11) {
-  // CTA "L" car(s). The roof can be run on.
+  // CTA "L" car(s) in brushed stainless steel. The roof can be run on.
   const g = new THREE.Group();
-  const side = toon(0xffffff, { map: trainSideTex() });
-  const front = toon(0xffffff, { map: trainFrontTex() });
-  const roof = toon(0xaab2bb);
-  const under = toon(0x2b2f36);
+  const side = toon(0xffffff, { map: trainSideTex(), metalness: 0.55, roughness: 0.38 });
+  const front = toon(0xffffff, { map: trainFrontTex(), metalness: 0.4, roughness: 0.4 });
+  const roof = toon(0xaab2bb, { metalness: 0.6, roughness: 0.45 });
+  const under = toon(0x2b2f36, { roughness: 0.7 });
+  const glass = toon(0x16202c, { roughness: 0.08, metalness: 0.6, env: 1.6 });
+  const steel = toon(0x9aa4ae, { metalness: 0.8, roughness: 0.35 });
+  const H = TRAIN_H - 0.4;
   for (let c = 0; c < cars; c++) {
     const z = -c * (carLen + 0.4) - carLen / 2;
-    const body = new THREE.Mesh(G.box(), [side, side, roof, under, front, front]);
-    body.scale.set(2.1, TRAIN_H - 0.4, carLen);
-    body.position.set(0, 0.4 + (TRAIN_H - 0.4) / 2, z);
+    const body = new THREE.Mesh(G.rboxSized(2.1, H, carLen, 0.16), [side, side, roof, under, front, front]);
+    body.position.set(0, 0.4 + H / 2, z);
     g.add(body);
-    g.add(box(roof, 1.9, 0.12, carLen - 0.4, 0, TRAIN_H + 0.04, z));
-    g.add(box(under, 1.7, 0.4, carLen - 1, 0, 0.22, z));
-    for (const zz of [z + carLen / 2 - 1.6, z - carLen / 2 + 1.6]) {
-      for (const x of [-0.75, 0.75]) {
-        const w = mesh(G.cyl(10), under, x, 0.3, zz, 0.5, 0.18, 0.5);
-        w.rotation.z = Math.PI / 2;
-        g.add(w);
+    // tinted window band down each side
+    for (const sx of [-1.056, 1.056]) {
+      for (let k = 0; k < 6; k++) g.add(mesh(G.rboxSized(0.02, 0.62, 1.05, 0.01), glass, sx, 1.75, z - carLen / 2 + 1 + k * ((carLen - 2) / 5)));
+    }
+    // roof: ribbed panels and two A/C units
+    for (let k = 0; k < 8; k++) g.add(mesh(G.rboxSized(1.8, 0.05, 0.08, 0.02), roof, 0, TRAIN_H + 0.01, z - carLen / 2 + 0.7 + k * ((carLen - 1.4) / 7)));
+    for (const dz of [-carLen / 4, carLen / 4]) g.add(mesh(G.rboxSized(1.2, 0.22, 1.6, 0.08), steel, 0, TRAIN_H + 0.11, z + dz));
+    g.add(mesh(G.rboxSized(1.7, 0.4, carLen - 1, 0.06), under, 0, 0.22, z));
+    // trucks: frame, springs and wheels
+    for (const zz of [z + carLen / 2 - 1.8, z - carLen / 2 + 1.8]) {
+      g.add(mesh(G.rboxSized(1.9, 0.2, 2.2, 0.05), under, 0, 0.35, zz));
+      for (const dz of [-0.6, 0.6]) {
+        for (const x of [-0.78, 0.78]) {
+          const w = mesh(G.cyl(20), steel, x, 0.3, zz + dz, 0.56, 0.12, 0.56);
+          w.rotation.z = Math.PI / 2;
+          g.add(w);
+          const hub = mesh(G.cyl(12), under, x * 1.06, 0.3, zz + dz, 0.2, 0.06, 0.2);
+          hub.rotation.z = Math.PI / 2;
+          g.add(hub);
+        }
       }
     }
-    // headlight glow
+    // gangway bellows between cars
+    if (c < cars - 1) g.add(mesh(G.rboxSized(1.6, H * 0.85, 0.5, 0.1), toon(0x1c1f23), 0, 0.4 + H / 2, z - carLen / 2 - 0.2));
     if (c === 0) {
-      const hl = toon(0xfff6c4, { emissive: 0xfff2a8, emissiveIntensity: 0.6, nightGlow: 3 });
-      g.add(sphere(hl, 0.14, -0.66, 0.9, 0.01), sphere(hl, 0.14, 0.66, 0.9, 0.01));
+      // headlights and a glowing "Loop" destination sign
+      const hl = toon(0xfff6c4, { emissive: 0xfff2a8, emissiveIntensity: 1.6, nightGlow: 4, roughness: 0.1 });
+      g.add(mesh(G.sphere(16, 12), hl, -0.66, 0.9, 0.04, 0.26, 0.26, 0.1), mesh(G.sphere(16, 12), hl, 0.66, 0.9, 0.04, 0.26, 0.26, 0.1));
+      g.add(mesh(G.plane(), nightGlowMat(0xfff2a8, 1.4), -0.66, 0.9, 0.12, 1.4, 1.4, 1), mesh(G.plane(), nightGlowMat(0xfff2a8, 1.4), 0.66, 0.9, 0.12, 1.4, 1.4, 1));
+      g.add(mesh(G.rboxSized(1.1, 0.26, 0.04, 0.02), toon(0x111111, { emissive: 0xffb703, emissiveIntensity: 0.6, nightGlow: 2.5 }), 0, TRAIN_H - 0.15, 0.03));
+      g.add(mesh(G.rboxSized(1.7, 0.75, 0.03, 0.05), glass, 0, 1.75, 0.02)); // windshield
     }
   }
   return shadows(g);
@@ -400,13 +445,21 @@ export function makeRamp(len = 6) {
 }
 
 export function makeBench() {
+  // Wooden park bench with cast-iron scroll ends.
   const g = new THREE.Group();
-  const wood = toon(C.wood);
-  const iron = toon(0x2b2f36);
-  for (let i = 0; i < 3; i++) g.add(box(wood, 1.9, 0.08, 0.16, 0, 0.5, -0.2 + i * 0.18));
-  for (let i = 0; i < 2; i++) g.add(box(wood, 1.9, 0.14, 0.06, 0, 0.75 + i * 0.2, -0.32));
+  const wood = toon(C.wood, { roughness: 0.65 });
+  const iron = toon(0x2b2f36, { metalness: 0.6, roughness: 0.4 });
+  for (let i = 0; i < 3; i++) g.add(mesh(G.rboxSized(1.9, 0.07, 0.15, 0.03), wood, 0, 0.5, -0.2 + i * 0.18));
+  for (let i = 0; i < 2; i++) {
+    const b = mesh(G.rboxSized(1.9, 0.13, 0.05, 0.02), wood, 0, 0.75 + i * 0.2, -0.33);
+    b.rotation.x = 0.12;
+    g.add(b);
+  }
   for (const x of [-0.8, 0.8]) {
-    g.add(box(iron, 0.08, 0.5, 0.5, x, 0.25, -0.05), box(iron, 0.08, 0.6, 0.08, x, 0.8, -0.32));
+    g.add(mesh(G.rboxSized(0.07, 0.5, 0.06, 0.02), iron, x, 0.25, 0.18), mesh(G.rboxSized(0.07, 0.95, 0.06, 0.02), iron, x, 0.47, -0.3));
+    const arm = mesh(G.torus(0.18, 0.03, 16), iron, x, 0.62, 0.05);
+    arm.rotation.y = Math.PI / 2;
+    g.add(arm);
   }
   return shadows(g);
 }
@@ -522,16 +575,39 @@ export function makeFallenBranch() {
 // ---------------------------------------------------------------------------
 // Street props (static scenery, baked per chunk)
 // ---------------------------------------------------------------------------
+function lampHead(g, x, y, z, big = 1) {
+  // Lantern: glowing globe, a halo for the bloom pass and a pool of light on the ground at night.
+  g.add(mesh(G.sphere(20, 16), toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.35, nightGlow: 3.2, roughness: 0.15 }), x, y, z, 0.52 * big, 0.52 * big, 0.52 * big));
+  const h1 = mesh(G.plane(), nightGlowMat(0xffd27a, 0.5), x, y, z, 1.6 * big, 1.6 * big, 1);
+  const h2 = h1.clone();
+  h2.rotation.y = Math.PI / 2;
+  g.add(h1, h2);
+}
+
+function lightPool(g, x, z, r = 3.4) {
+  const p = mesh(G.plane(), nightGlowMat(0xffc56b, 0.28), x, 0.04, z, r * 2, r * 2, 1);
+  p.rotation.x = -Math.PI / 2;
+  g.add(p);
+}
+
 export function makeLampPost({ banner = true, wflag = false } = {}) {
   const g = new THREE.Group();
-  const pole = toon(C.black);
-  g.add(cyl(pole, 0.08, 4.2, 0, 2.1, 0));
-  g.add(cyl(pole, 0.18, 0.3, 0, 0.15, 0));
-  g.add(sphere(toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.25, nightGlow: 2.2 }), 0.26, 0, 4.4, 0));
-  g.add(mesh(G.cone(8), pole, 0, 4.72, 0, 0.3, 0.25, 0.3));
+  const pole = toon(C.black, { metalness: 0.5, roughness: 0.45 });
+  g.add(mesh(G.lathe('lampbase', [[0.001, 0], [0.24, 0], [0.24, 0.12], [0.16, 0.2], [0.18, 0.38], [0.1, 0.5], [0.08, 0.6], [0.001, 0.6]], 20), pole, 0, 0, 0));
+  g.add(mesh(G.cyl(16), pole, 0, 2.4, 0, 0.15, 3.8, 0.15));
+  g.add(mesh(G.torus(0.1, 0.03, 16), pole, 0, 2.2, 0), mesh(G.torus(0.1, 0.03, 16), pole, 0, 4.1, 0));
+  g.children.at(-1).rotation.x = Math.PI / 2;
+  g.children.at(-2).rotation.x = Math.PI / 2;
+  lampHead(g, 0, 4.45, 0);
+  g.add(mesh(G.cone(16), pole, 0, 4.82, 0, 0.36, 0.28, 0.36));
+  g.add(mesh(G.sphere(10, 8), pole, 0, 5.0, 0, 0.08, 0.08, 0.08));
+  lightPool(g, 0, 0);
   if (banner) {
     const bm = toon(0xffffff, { map: wflag ? wFlagTex() : chicagoFlagTex(), side: THREE.DoubleSide });
-    const b = new THREE.Mesh(G.plane(), bm);
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 6, 1), bm);
+    const pos = b.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin((pos.getX(i) + 0.5) * 3) * 0.06);
+    b.geometry.computeVertexNormals();
     b.scale.set(0.6, wflag ? 0.45 : 0.9, 1);
     b.rotation.y = Math.PI / 2;
     b.position.set(0, 3.2, 0.36);
@@ -543,11 +619,14 @@ export function makeLampPost({ banner = true, wflag = false } = {}) {
 
 export function makeTwinLamp() {
   const g = new THREE.Group();
-  const pole = toon(C.black);
-  g.add(cyl(pole, 0.09, 3.6, 0, 1.8, 0));
-  g.add(box(pole, 1.0, 0.07, 0.07, 0, 3.4, 0));
-  const bulb = toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.25, nightGlow: 2.2 });
-  for (const x of [-0.5, 0, 0.5]) g.add(sphere(bulb, 0.2, x, x === 0 ? 3.85 : 3.6, 0));
+  const pole = toon(C.black, { metalness: 0.5, roughness: 0.45 });
+  g.add(mesh(G.lathe('lampbase', [[0.001, 0], [0.24, 0], [0.24, 0.12], [0.16, 0.2], [0.18, 0.38], [0.1, 0.5], [0.08, 0.6], [0.001, 0.6]], 20), pole, 0, 0, 0));
+  g.add(mesh(G.cyl(16), pole, 0, 2.0, 0, 0.17, 3.2, 0.17));
+  const arm = mesh(G.torus(0.5, 0.035, 20), pole, 0, 3.4, 0);
+  arm.scale.y = 0.5;
+  g.add(arm);
+  for (const x of [-0.5, 0, 0.5]) lampHead(g, x, x === 0 ? 3.85 : 3.62, 0, 0.8);
+  lightPool(g, 0, 0, 3.8);
   return g;
 }
 
@@ -597,10 +676,20 @@ export function makeFlowerPlanter(w = 1.6) {
 }
 
 export function makeTree(scale = 1, leafColor = 0x3fae49) {
+  // Trunk with two limbs and a lumpy, two-tone canopy.
   const g = new THREE.Group();
-  g.add(mesh(G.cyl(8, 0.14, 0.2), toon(0x6b4226), 0, 1.0, 0, 1, 2.0, 1));
-  const leaf = toon(leafColor);
-  g.add(sphere(leaf, 1.0, 0, 2.6, 0), sphere(leaf, 0.75, 0.6, 2.2, 0.2), sphere(leaf, 0.7, -0.55, 2.3, -0.2), sphere(leaf, 0.6, 0, 3.3, 0));
+  const bark = toon(0x6b4226, { roughness: 0.95 });
+  g.add(mesh(G.cyl(12, 0.13, 0.22), bark, 0, 1.0, 0, 1, 2.0, 1));
+  for (const [a, l] of [[0.6, 1], [-0.7, 0.8]]) {
+    const limb = mesh(G.cyl(8, 0.05, 0.09), bark, Math.sin(a) * 0.35, 2.1, 0, 1, l, 1);
+    limb.rotation.z = -a;
+    g.add(limb);
+  }
+  const base = new THREE.Color(leafColor);
+  const leafA = toon(base.getHex(), { roughness: 0.9 });
+  const leafB = toon(base.clone().offsetHSL(0.02, 0.05, 0.08).getHex(), { roughness: 0.9 });
+  const lumps = [[0, 2.7, 0, 1.15], [0.7, 2.3, 0.2, 0.8], [-0.65, 2.4, -0.2, 0.8], [0.1, 3.4, 0.1, 0.75], [-0.2, 2.6, 0.6, 0.7], [0.3, 2.8, -0.6, 0.7]];
+  lumps.forEach(([x, y, z, r], i) => g.add(mesh(G.foliage(i + 1), i % 2 ? leafB : leafA, x, y, z, r * 2, r * 1.8, r * 2)));
   g.scale.setScalar(scale);
   return g;
 }

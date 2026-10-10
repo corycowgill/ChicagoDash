@@ -5,6 +5,26 @@ import { LANES, THEMES, themeIndexAt, SECTION_LEN } from './world.js';
 import * as M from './models.js';
 import { bake, disposeObject } from './geo.js';
 import { FESTIVALS } from './chicago.js';
+import * as THREE from 'three';
+import { glowTex } from './materials.js';
+
+const BEAM_GEO = new THREE.CylinderGeometry(0.28, 0.5, 6, 16, 1, true);
+let beamTexture = null;
+function beamTex() {
+  if (beamTexture) return beamTexture;
+  const c = document.createElement('canvas');
+  c.width = 4;
+  c.height = 128;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 128);
+  gr.addColorStop(0, 'rgba(255,255,255,0)');
+  gr.addColorStop(0.7, 'rgba(255,255,255,0.5)');
+  gr.addColorStop(1, 'rgba(255,255,255,0.9)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 4, 128);
+  beamTexture = new THREE.CanvasTexture(c);
+  return beamTexture;
+}
 
 export const ACTIVATE_DIST = 75; // moving hazards start rolling this far ahead
 const RAMP_LEN = 7;
@@ -119,7 +139,14 @@ export class Spawner {
         continue;
       }
       p.obj.rotation.y = t * (p.type === 'coin' ? 3.2 : 2) + p.phase;
-      if (p.type !== 'coin') p.obj.position.y = p.y + Math.sin(t * 3 + p.phase) * 0.15;
+      if (p.type !== 'coin') {
+        p.obj.position.y = p.y + Math.sin(t * 3 + p.phase) * 0.15;
+        const ex = p.obj.userData.extras;
+        if (ex) {
+          ex[0].scale.setScalar(2 + Math.sin(t * 5 + p.phase) * 0.35);
+          ex[0].position.copy(p.obj.position);
+        }
+      }
     }
   }
 
@@ -396,6 +423,15 @@ export class Spawner {
     obj.position.set(LANES[lane], 1.1, -d);
     obj.scale.setScalar(1.25);
     this.scene.add(obj);
+    // A coloured aura and a tall light beam make power-ups readable from afar.
+    const col = new THREE.Color(M.PICKUPS[type].color);
+    const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: col, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.85 }));
+    aura.scale.setScalar(2.2);
+    aura.position.set(LANES[lane], 1.1, -d);
+    const beam = new THREE.Mesh(BEAM_GEO, new THREE.MeshBasicMaterial({ color: col, map: beamTex(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, opacity: 0.55 }));
+    beam.position.set(LANES[lane], 3.4, -d);
+    this.scene.add(aura, beam);
+    obj.userData.extras = [aura, beam];
     this.pickups.push({ type, obj, x: LANES[lane], y: 1.1, z: -d, phase: Math.random() * 6 });
     this.lastPower = d;
     this.laneLast[lane] = Math.max(this.laneLast[lane], d);
@@ -403,6 +439,10 @@ export class Spawner {
 
   releasePickup(p) {
     this.scene.remove(p.obj);
+    for (const e of p.obj.userData.extras || []) {
+      this.scene.remove(e);
+      e.material.dispose();
+    }
     if (p.type === 'coin') {
       p.obj.scale.setScalar(1);
       (p.green ? this.coinPool.green : this.coinPool.gold).push(p.obj);

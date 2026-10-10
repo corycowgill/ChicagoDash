@@ -4,8 +4,9 @@ import * as THREE from 'three';
 import { G, mesh, box, cyl, sphere, bake, disposeObject } from './geo.js';
 import {
   toon, basic, facadeTiled, trackTex, paverTex, asphaltTex, grassTex, waterTex, brickTex, awningTex,
-  shopSignTex, marqueeTex, verticalChicagoTex, skyTex, setNight,
+  shopSignTex, marqueeTex, verticalChicagoTex, setNight, waterNormalTex,
 } from './materials.js';
+import { Q } from './quality.js';
 import {
   makeLampPost, makeTwinLamp, makeBusShelter, makeMailbox, makeFlowerPlanter, makeTree, makeParkedBike,
   makeBalustrade, makeRailing, makeWaterTaxi, makeTourBoat, makePennantString, makeFan, makeTrain, makeBench,
@@ -69,9 +70,10 @@ const SHOPS = [
 ];
 
 export class World {
-  constructor(scene, quality = 'high') {
+  constructor(scene, quality = 'high', renderer = null) {
     this.scene = scene;
     this.quality = quality;
+    this.pmrem = renderer && Q.pbr ? new THREE.PMREMGenerator(renderer) : null;
     this.chunks = new Map();
     this.animated = [];
     this.event = 'day';
@@ -83,6 +85,7 @@ export class World {
     scene.add(this.root);
 
     this.setupLights();
+    this.buildSky();
     this.buildSkyline();
     this.buildSnow();
     this.applyEvent('day');
@@ -94,13 +97,14 @@ export class World {
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
     this.sun.position.set(-12, 30, 10);
-    this.sun.castShadow = this.quality !== 'low';
+    this.sun.castShadow = Q.shadows;
     const s = this.sun.shadow;
-    s.mapSize.set(this.quality === 'high' ? 2048 : 1024, this.quality === 'high' ? 2048 : 1024);
-    s.camera.left = -14;
-    s.camera.right = 14;
-    s.camera.top = 30;
-    s.camera.bottom = -14;
+    s.mapSize.set(Q.shadowSize, Q.shadowSize);
+    // Tight frustum around the runner = crisp shadows
+    s.camera.left = -12;
+    s.camera.right = 12;
+    s.camera.top = 26;
+    s.camera.bottom = -10;
     s.camera.near = 1;
     s.camera.far = 80;
     s.bias = -0.0008;
@@ -117,18 +121,28 @@ export class World {
     this.event = ev;
     const night = ev === 'night';
     const snow = ev === 'snow';
-    let sky;
-    if (night) sky = skyTex('#060b24', '#1b2350', '#3b3a6b');
-    else if (snow) sky = skyTex('#9fb1c8', '#d3dbe6', '#eef2f7');
-    else if (ev === 'stpats') sky = skyTex('#2b8fe8', '#8fd0ff', '#e6fff0');
-    else sky = skyTex('#2b7de9', '#7cc4ff', '#fff2d6');
-    this.scene.background = sky;
+    const SKY = {
+      night: ['#050a22', '#1b2350', '#3d3b70', '#ffffff', 0.0],
+      snow: ['#93a7c2', '#cfd8e4', '#eef2f7', '#ffffff', 0.15],
+      stpats: ['#0f6ad8', '#5fb8ff', '#d8f7e6', '#fff6d8', 1.0],
+      gameday: ['#0a48b8', '#3f9bff', '#cfe6ff', '#fff3cf', 1.0],
+      day: ['#0a48b8', '#3f9bff', '#cfe6ff', '#fff3cf', 1.0],
+    }[ev] || ['#0a48b8', '#3f9bff', '#cfe6ff', '#fff3cf', 1.0];
+    const u = this.skyDome.material.uniforms;
+    u.uTop.value.set(SKY[0]);
+    u.uMid.value.set(SKY[1]);
+    u.uBottom.value.set(SKY[2]);
+    u.uSunColor.value.set(SKY[3]);
+    u.uSunGlow.value = SKY[4];
+    this.scene.background = new THREE.Color(SKY[2]);
+    this.updateEnvironment(SKY);
     this.scene.fog.color.set(night ? 0x1d2148 : snow ? 0xdfe6ee : ev === 'stpats' ? 0xd6f5e6 : 0xcfe9ff);
     this.scene.fog.near = snow ? 30 : 60;
     this.scene.fog.far = snow ? 160 : 240;
-    this.hemi.intensity = night ? 0.55 : snow ? 1.3 : 1.15;
+    // With an environment map providing ambient light, the hemi light is a fill.
+    this.hemi.intensity = night ? 0.6 : (snow ? 1.3 : 1.15) * (this.pmrem ? 0.45 : 1);
     this.hemi.color.set(night ? 0x6b7bd6 : 0xcfe8ff);
-    this.sun.intensity = night ? 0.35 : snow ? 1.2 : 2.3;
+    this.sun.intensity = (night ? 0.35 : snow ? 1.2 : 2.3) * (this.pmrem ? 1.25 : 1);
     this.sun.color.set(night ? 0x8fa2ff : 0xfff1d6);
     this.playerLight.intensity = night ? 25 : 0;
     setNight(night);
@@ -137,13 +151,85 @@ export class World {
     this.moon.visible = night;
     this.sunDisc.visible = !night && !snow;
     const water = ev === 'stpats' ? '#19c25a' : night ? '#173a6b' : '#2f8fd8';
-    this.waterMat.map = waterTex(water);
-    this.waterMat.needsUpdate = true;
-    this.lakeMat.map = waterTex(ev === 'stpats' ? '#2fbf6a' : night ? '#14305a' : '#3aa0e8');
-    this.lakeMat.needsUpdate = true;
+    const lake = ev === 'stpats' ? '#2fbf6a' : night ? '#14305a' : '#3aa0e8';
+    if (Q.pbr) {
+      this.waterMat.color.set(water).multiplyScalar(0.55);
+      this.lakeMat.color.set(lake).multiplyScalar(0.55);
+    } else {
+      this.waterMat.map = waterTex(water);
+      this.waterMat.needsUpdate = true;
+      this.lakeMat.map = waterTex(lake);
+      this.lakeMat.needsUpdate = true;
+    }
     for (const m of this.skylineMats) m.color.copy(m.userData.base).multiplyScalar(night ? 0.45 : 1);
     getChrome().color.set(night ? 0x6f7a99 : 0xdfe6ee);
     for (const m of this.skylineWin) m.opacity = night ? 1 : 0;
+  }
+
+  // -------------------------------------------------------------------------
+  /** Gradient sky dome with a sun glow; follows the camera. */
+  buildSky() {
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        uTop: { value: new THREE.Color('#2479e8') },
+        uMid: { value: new THREE.Color('#7cc4ff') },
+        uBottom: { value: new THREE.Color('#fff0d0') },
+        uSunColor: { value: new THREE.Color('#fff3cf') },
+        uSunDir: { value: new THREE.Vector3(-0.45, 0.42, -0.79).normalize() },
+        uSunGlow: { value: 1 },
+      },
+      vertexShader: /* glsl */ `
+        varying vec3 vDir;
+        void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uTop, uMid, uBottom, uSunColor, uSunDir; uniform float uSunGlow;
+        varying vec3 vDir;
+        void main() {
+          float h = vDir.y;
+          vec3 col = h > 0.03 ? mix(uMid, uTop, smoothstep(0.03, 0.55, h)) : mix(uBottom, uMid, smoothstep(-0.04, 0.03, h));
+          float sd = max(dot(normalize(vDir), uSunDir), 0.0);
+          col += uSunColor * (pow(sd, 24.0) * 0.18 + pow(sd, 256.0) * 0.8) * uSunGlow;
+          gl_FragColor = vec4(col, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+    });
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(700, 32, 16), mat);
+    this.skyDome.frustumCulled = false;
+    this.skyDome.renderOrder = -10;
+    this.scene.add(this.skyDome);
+  }
+
+  /** Image-based lighting: bake the current sky (plus a skyline band) into a PMREM. */
+  updateEnvironment(SKY) {
+    if (!this.pmrem) return;
+    const env = new THREE.Scene();
+    const dome = this.skyDome.clone();
+    dome.material = this.skyDome.material.clone();
+    dome.material.uniforms = THREE.UniformsUtils.clone(this.skyDome.material.uniforms);
+    dome.scale.setScalar(0.1);
+    env.add(dome);
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(60, 24), new THREE.MeshBasicMaterial({ color: this.event === 'snow' ? 0xdfe4ea : 0x6f6a60 }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -2;
+    env.add(ground);
+    const bmat = new THREE.MeshBasicMaterial({ color: this.event === 'night' ? 0x1a2036 : 0x5d6f88 });
+    for (let i = 0; i < 28; i++) {
+      const a = (i / 28) * Math.PI * 2;
+      const h = 6 + ((i * 37) % 11) * 1.4;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(6, h, 6), bmat);
+      b.position.set(Math.cos(a) * 50, h / 2 - 2, Math.sin(a) * 50);
+      env.add(b);
+    }
+    const rt = this.pmrem.fromScene(env, 0.03);
+    this.envRT?.dispose();
+    this.envRT = rt;
+    this.scene.environment = rt.texture;
+    env.traverse((o) => o.geometry?.dispose());
+    void SKY;
   }
 
   // -------------------------------------------------------------------------
@@ -250,12 +336,17 @@ export class World {
     g.add(fw.group);
 
     // Clouds
-    const cloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, fog: false });
+    const cloudMat = Q.pbr
+      ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, emissive: 0xb8c8e0, emissiveIntensity: 0.35, fog: false })
+      : new THREE.MeshToonMaterial({ color: 0xffffff, fog: false });
     this.skylineMats.push(Object.assign(cloudMat, { userData: { base: new THREE.Color(0xffffff) } }));
     this.clouds = new THREE.Group();
     for (let i = 0; i < 9; i++) {
       const c = new THREE.Group();
-      for (let j = 0; j < 5; j++) c.add(sphere(cloudMat, rand(5, 9), j * 6 - 12, rand(-1, 2), rand(-2, 2)));
+      for (let j = 0; j < 8; j++) {
+        const r = rand(4, 9);
+        c.add(mesh(G.foliage(j + i * 3), cloudMat, j * 4.2 - 15, rand(-1, 2.5) + (j > 1 && j < 6 ? 2 : 0), rand(-3, 3), r * 2, r * 1.6, r * 2));
+      }
       c.position.set(rand(-220, 220), rand(120, 175), rand(-60, -20));
       c.scale.y = 0.55;
       this.clouds.add(c);
@@ -280,8 +371,20 @@ export class World {
     g.add(this.stars);
 
     // Water / lake materials (shared by chunks)
-    this.waterMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: waterTex('#2f8fd8') });
-    this.lakeMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: waterTex('#3aa0e8') });
+    if (Q.pbr) {
+      // Glassy water: rippling normal map + sky reflections from the environment.
+      const mkWater = (rx, ry) => {
+        const n = waterNormalTex().clone();
+        n.repeat.set(rx, ry);
+        n.needsUpdate = true;
+        return new THREE.MeshStandardMaterial({ color: 0x1d5f99, roughness: 0.06, metalness: 0.35, normalMap: n, normalScale: new THREE.Vector2(0.6, 0.6), envMapIntensity: 1.4 });
+      };
+      this.waterMat = mkWater(8, 6);
+      this.lakeMat = mkWater(30, 6);
+    } else {
+      this.waterMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: waterTex('#2f8fd8') });
+      this.lakeMat = new THREE.MeshToonMaterial({ color: 0xffffff, map: waterTex('#3aa0e8') });
+    }
 
     g.position.y = -12;
     this.skyline = g;
@@ -340,8 +443,10 @@ export class World {
     this.clouds.position.x = (this.time * 2) % 80;
     this.ferris.rotation.z = this.time * 0.06;
     // water flow
-    this.waterMat.map.offset.y = (this.time * 0.15) % 1;
-    this.lakeMat.map.offset.x = (this.time * 0.03) % 1;
+    const wm = Q.pbr ? 'normalMap' : 'map';
+    this.waterMat[wm].offset.set((this.time * 0.02) % 1, (this.time * 0.12) % 1);
+    this.lakeMat[wm].offset.set((this.time * 0.025) % 1, (this.time * 0.01) % 1);
+    this.skyDome.position.copy(camera.position);
     // shadow camera follows the runner
     this.sun.position.set(-12, 30, playerZ + 6);
     this.sun.target.position.set(0, 0, playerZ - 8);
@@ -411,18 +516,30 @@ export class World {
     return p;
   }
 
-  building(g, x, z, w, h, d, style, color, seed, baseY = 0) {
+  building(g, x, z, w, h, d, style, color, seed, baseY = 0, storefront = false) {
     // A handful of facade variants per colour keeps textures + materials shared;
     // the street-facing side (depth d) sets the window tiling.
     const f = facadeTiled(style, color, Math.abs(seed | 0) % 3, d, h);
-    const mat = toon(0xffffff, { map: f.map, emissive: 0xffffff, emissiveMap: f.emissiveMap, emissiveIntensity: 0, nightGlow: 0.6 });
+    const mat = toon(0xffffff, { map: f.map, emissive: 0xffffff, emissiveMap: f.emissiveMap, emissiveIntensity: 0, nightGlow: 0.42, roughness: style === 'glass' || style === 'dark' ? 0.25 : 0.85, metalness: style === 'glass' || style === 'dark' ? 0.35 : 0 });
     const roof = toon(style === 'glass' ? 0x5c7896 : 0x6b6f78);
     const b = new THREE.Mesh(G.box(), [mat, mat, roof, roof, mat, mat]);
     b.scale.set(w, h, d);
     b.position.set(x, baseY + h / 2, z);
     g.add(b);
-    // cornice / rooftop details
-    if (style !== 'glass') g.add(box(toon(0xe9e2d0), w + 0.3, 0.4, d + 0.3, x, baseY + h + 0.2, z));
+    // floor ledges, a darker street-level base, cornice and parapet
+    if (style !== 'glass' && style !== 'dark') {
+      const trim = toon(0xe9e2d0, { roughness: 0.9 });
+      for (let y = 3.6; y < h - 2; y += 6.6) g.add(box(trim, w + 0.16, 0.22, d + 0.16, x, baseY + y, z));
+      g.add(box(toon(0xe9e2d0), w + 0.5, 0.5, d + 0.5, x, baseY + h + 0.1, z));
+      g.add(box(toon(0xcfc6b2), w + 0.3, 0.9, d + 0.3, x, baseY + h + 0.6, z));
+      g.add(box(toon(0x6b6f78), w - 0.4, 0.95, d - 0.4, x, baseY + h + 0.62, z)); // roof deck inset
+    } else {
+      // curtain wall: metal fins at the corners and a crown
+      const fin = toon(0xb7c3cf, { roughness: 0.3, metalness: 0.7 });
+      for (const [dx, dz] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) g.add(box(fin, 0.3, h, 0.3, x + dx, baseY + h / 2, z + dz));
+      g.add(box(fin, w + 0.2, 0.6, d + 0.2, x, baseY + h + 0.3, z));
+    }
+    if (!storefront) g.add(box(toon(0x3a3d44, { roughness: 0.6 }), w + 0.12, Math.min(3.2, h * 0.2), d + 0.12, x, baseY + Math.min(1.6, h * 0.1), z));
     if (Math.random() < 0.4) g.add(box(toon(0x8a8f99), w * 0.3, 1.2, d * 0.3, x + rand(-w / 4, w / 4), baseY + h + 0.6, z)); // HVAC
     if (Math.random() < 0.25) {
       // rooftop water tower — very Chicago
@@ -770,7 +887,7 @@ export class World {
         const h = rand(9, 14);
         const brickCol = pick(['#a2472f', '#8f3b2a', '#b5653d', '#7a4a3a', '#c2a27a']);
         const x = s * (8 + 3);
-        const b = this.building(g, x, -z - w / 2, 6, h, w, 'brick', brickCol, (i * 13 + z) | 0, 0.18);
+        const b = this.building(g, x, -z - w / 2, 6, h, w, 'brick', brickCol, (i * 13 + z) | 0, 0.18, true);
         if (s === -1 && local >= 3 && local <= 6) {
           // rooftop seats looking into the ballpark across the street
           const rb = rooftopBleachers();

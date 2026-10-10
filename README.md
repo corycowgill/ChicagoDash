@@ -10,7 +10,7 @@ The repo root is a working static site with no build step, like the other Halluc
 python -m http.server 8765    # then open http://localhost:8765/
 ```
 
-Three.js (r170, MIT) is vendored in `vendor/three/` and resolved through an import map in `index.html`.
+Three.js (r170, MIT) and the few add-ons the game uses (post-processing, rounded boxes, geometry utils) are vendored in `vendor/three/` and resolved through an import map in `index.html`.
 
 For development with hot reload, or a bundled build in `dist/`:
 
@@ -66,11 +66,20 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - 3 daily challenges, the same for everyone on a given date, with rewards paid automatically.
   - Spend coins to keep running after a crash.
 - **Audio**: synthesized sound effects and a procedural chiptune loop that speeds up as you do. Everything is WebAudio, with no asset files.
-- **Performance**:
-  - Static scenery and obstacles are merged per material, which keeps each frame to a few hundred draw calls.
-  - Textures are generated on canvas and cached.
-  - Resolution drops automatically if the frame rate does.
-  - Quality setting: High, Medium or Low (no shadows).
+- **Graphics**:
+  - Physically based materials lit by an environment baked from the sky, with filmic (ACES) tone mapping.
+  - Post-processing: bloom on lights, signs and coins; color grading and vignette; a radial speed blur at high speed; and a red flash when you're hit.
+  - Normal maps generated from every painted texture, so mortar, pavers, window recesses and railroad ties catch the light.
+  - Glassy, rippling water; a sky dome with a sun glow; and soft, lumpy clouds.
+  - High-poly models: rounded steel "L" cars with glass window bands, trucks and A/C units; polished metal coins; lathed cones, trash cans and lamp posts; organic tree canopies; and runners with eyebrows, noses, ears, cap buttons, drawstrings and laced sneakers.
+  - Effects: dust and landing puffs, slide sparks, coin twinkles, power-up auras and light beams, speed lines, a shimmering shield bubble, and lamp halos with pools of light on the ground at night.
+- **Graphics quality** (Settings → Graphics):
+  - **High:** everything above at full resolution, with 4× MSAA and 2048 px shadows.
+  - **Medium:** physically based materials and half-resolution bloom.
+  - **Low:** cartoon shading with no post-processing or shadows.
+  - Auto picks Medium on phones and High elsewhere.
+  - If the frame rate drops, bloom turns off first, then the resolution drops.
+  - Static scenery and obstacles are merged per material to keep draw calls low.
 
 ## Studio ident
 
@@ -89,7 +98,9 @@ The game opens with the Hallucinated Games intro. `intro/hallucinated-intro.js` 
 | `src/chicago.js` | Chicago facts, sayings, real intersections and festival names |
 | `src/characters.js` | The four rigged runners and their run, jump, slide and fall animations |
 | `src/materials.js` | Toon materials and the procedurally painted canvas textures |
-| `src/geo.js` | Cached primitive geometry and the `bake()` mesh-merging helper |
+| `src/geo.js` | Cached primitive geometry (rounded boxes, lathes, foliage) and the `bake()` mesh-merging helper |
+| `src/post.js` | Bloom, color grade, speed blur and tone-mapping chain |
+| `src/quality.js` | High / Medium / Low graphics profiles |
 | `src/fx.js` | Pooled particle bursts |
 | `src/audio.js` | WebAudio sound effects and music |
 | `src/input.js` | Keyboard and swipe input |

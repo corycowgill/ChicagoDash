@@ -8,7 +8,9 @@ import { powerDuration } from './save.js';
 import { PICKUPS, TRAIN_H } from './models.js';
 import { G } from './geo.js';
 import { CHEERS, OUCHES, pick } from './chicago.js';
-import { basic } from './materials.js';
+import { Q, setQuality } from './quality.js';
+import { Post } from './post.js';
+import { basic, blobShadowTex } from './materials.js';
 
 const GRAVITY = 40;
 const JUMP_V = 12.6;
@@ -31,24 +33,38 @@ export class Game {
 
     const q = this.resolveQuality();
     this.quality = q;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: q !== 'low', powerPreference: 'high-performance' });
+    setQuality(q); // must happen before any geometry or material is built
+    // With post-processing on, antialiasing comes from the MSAA render target.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !Q.post && q !== 'low', powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q === 'high' ? 2 : q === 'medium' ? 1.5 : 1));
-    this.renderer.shadowMap.enabled = q !== 'low';
+    this.renderer.shadowMap.enabled = Q.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = Q.pbr ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    Q.anisotropy = Math.min(16, this.renderer.capabilities.getMaxAnisotropy());
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 800);
-    this.world = new World(this.scene, q);
+    this.post = new Post(this.renderer, this.scene, this.camera);
+    this.flash = 0;
+    this.world = new World(this.scene, q, this.renderer);
     this.spawner = new Spawner(this.scene);
     this.fx = new FX(this.scene);
 
     this.player = { z: 0, x: 0, lane: 1, laneFrom: 1, y: 0, vy: 0, grounded: true, slideT: 0, hearts: START_HEARTS, invuln: 0, coyote: 0, onTrain: null };
     this.powers = { pizza: 0, hotdog: 0, coffee: 0, flag: 0 };
-    this.shieldMesh = new THREE.Mesh(G.sphere(20, 14), basic(0x6ec6f0, { opacity: 0.28, transparent: true, depthWrite: false }));
+    this.shieldMesh = new THREE.Mesh(G.sphere(32, 24), makeShieldMaterial());
     this.shieldMesh.scale.set(1.9, 2.4, 1.9);
     this.shieldMesh.visible = false;
     this.scene.add(this.shieldMesh);
+    // Soft contact shadow that stays on the ground (and shrinks) as you jump.
+    this.blob = new THREE.Mesh(G.plane(), basic(0xffffff, { map: blobShadowTex(), transparent: true, depthWrite: false }));
+    this.blob.rotation.x = -Math.PI / 2;
+    this.blob.renderOrder = 1;
+    this.scene.add(this.blob);
+    this.dustT = 0;
+    this.twinkleT = 0;
 
     this.camPos = new THREE.Vector3(0, 4, 8);
     this.camLook = new THREE.Vector3(0, 1, -6);
@@ -85,6 +101,7 @@ export class Game {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h);
     this.camera.aspect = w / h;
     // Portrait phones: widen the view so all three lanes stay on screen.
     this.camera.fov = w / h < 0.8 ? 78 : w / h < 1.2 ? 70 : 62;
@@ -101,6 +118,7 @@ export class Game {
   setEvent(ev) {
     this.event = ev;
     this.world.applyEvent(ev);
+    this.post.setMood(ev);
     this.spawner.greenCoins = ev === 'stpats';
   }
 
@@ -167,8 +185,15 @@ export class Game {
     if (this.state === 'running') this.updateRun(dt);
     else if (this.state === 'dying') this.updateDying(dt);
     else if (this.state === 'menu') this.updateMenu(dt);
-    if (this.state !== 'paused') this.fx.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    if (this.state !== 'paused') {
+      this.fx.update(dt, this.camera);
+      this.shieldMesh.material.uniforms.uTime.value = this.time;
+    }
+    const running = this.state === 'running';
+    this.fx.speedLines(dt, this.camera, running ? Math.min(1, Math.max(0, (this.speed - 24) / 10)) + (this.powers.hotdog > 0 ? 1 : 0) : 0);
+    const speedFx = running ? Math.min(1, Math.max(0, (this.speed - 22) / 14)) * 0.55 + (this.powers.hotdog > 0 ? 0.8 : 0) : 0;
+    this.flash = Math.max(0, this.flash - dt * 2.5);
+    this.post.render(dt, speedFx, this.flash);
     this.adaptQuality(dt);
   }
 
@@ -180,6 +205,7 @@ export class Game {
     const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
     this.frameTimes = [];
     const pr = this.renderer.getPixelRatio();
+    if (avg > 1 / 40 && this.post.disableBloom()) return;
     if (avg > 1 / 40 && pr > 0.75) {
       this.renderer.setPixelRatio(Math.max(0.75, pr - 0.25));
       this.resize();
@@ -292,6 +318,7 @@ export class Game {
         p.vy = 0;
         p.grounded = true;
         this.audio.play('land');
+        this.fx.dust(new THREE.Vector3(p.x, p.y + 0.05, p.z), 6, true);
       }
     }
     if (p.grounded && ground.train && !this.roofsSeen.has(ground.train.id)) {
@@ -346,11 +373,34 @@ export class Game {
     const mode = !p.grounded ? 'jump' : p.slideT > 0 ? 'slide' : 'run';
     this.char.update(dt, { mode, runRate: this.speed / 16, lean: (tx - p.x) * -0.4, jumpT: Math.min(1, Math.abs(p.vy) / JUMP_V) });
     this.char.root.position.set(p.x, p.y, p.z);
+    this.blob.position.set(p.x, ground.h + 0.03, p.z);
+    const lift = Math.max(0, p.y - ground.h);
+    this.blob.scale.setScalar(Math.max(0.4, 1.3 - lift * 0.25));
+    this.blob.material.opacity = Math.max(0.25, 1 - lift * 0.3);
+    // sneakers kick up dust; sliding throws sparks
+    this.dustT -= dt;
+    if (p.grounded && this.dustT <= 0) {
+      this.dustT = p.slideT > 0 ? 0.03 : 0.08;
+      const at = new THREE.Vector3(p.x + (Math.random() - 0.5) * 0.4, p.y + 0.05, p.z + 0.3);
+      if (p.slideT > 0) this.fx.burst(at, { color: 0xffb347, n: 2, speed: 2.5, size: 0.06, life: 0.25, gravity: 9, shape: 'spark', up: 1.5 });
+      else this.fx.dust(at, 1);
+    }
+    // coins ahead twinkle now and then
+    this.twinkleT -= dt;
+    if (this.twinkleT <= 0) {
+      this.twinkleT = 0.12;
+      const ahead = this.spawner.pickups.filter((it) => it.z < p.z && it.z > p.z - 35);
+      if (ahead.length) {
+        const it = ahead[(Math.random() * ahead.length) | 0];
+        this.fx.twinkle(new THREE.Vector3(it.obj.position.x + (Math.random() - 0.5) * 0.4, it.obj.position.y + 0.3, it.obj.position.z), it.type === 'coin' ? 0.9 : 1.6);
+      }
+    }
     this.char.setBlink(p.invuln > 0 && this.powers.hotdog <= 0);
     this.shieldMesh.visible = this.powers.flag > 0;
     if (this.shieldMesh.visible) {
       this.shieldMesh.position.set(p.x, p.y + (p.slideT > 0 && p.grounded ? 0.5 : 1.0), p.z);
-      this.shieldMesh.material.opacity = 0.2 + Math.sin(this.time * 8) * 0.06 + (this.powers.flag < 2 ? Math.sin(this.time * 30) * 0.1 : 0);
+      // flicker when the shield is about to run out
+      if (this.powers.flag < 2 && Math.sin(this.time * 30) < 0) this.shieldMesh.visible = false;
     }
     if (this.powers.hotdog > 0 && Math.random() < 0.5) {
       this.fx.burst(new THREE.Vector3(p.x + (Math.random() - 0.5), p.y + 0.3, p.z + 0.6), { color: 0xffb347, n: 1, speed: 1, size: 0.18, life: 0.3, gravity: 0, shape: 'spark', up: 0.5 });
@@ -485,6 +535,7 @@ export class Game {
       return;
     }
     p.hearts--;
+    this.flash = 0.85;
     this.run.hits++;
     this.run.sinceHit = 0;
     this.shake = 0.9;
@@ -610,3 +661,30 @@ export class Game {
 }
 
 export { TRAIN_H, SECTION_LEN };
+
+/** Shimmering force-field bubble for the Chicago flag shield. */
+function makeShieldMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(0x6ec6f0) }, uStar: { value: new THREE.Color(0xff3b4f) } },
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main() {
+        vec4 wp = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal); vV = normalize(-wp.xyz); vP = position;
+        gl_Position = projectionMatrix * wp;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uTime; uniform vec3 uColor; uniform vec3 uStar;
+      varying vec3 vN; varying vec3 vV; varying vec3 vP;
+      void main() {
+        float rim = pow(1.0 - abs(dot(vN, vV)), 2.2);
+        float bands = 0.5 + 0.5 * sin(vP.y * 28.0 - uTime * 5.0);
+        float hex = step(0.92, abs(sin(vP.x * 22.0 + uTime) * sin(vP.y * 22.0) * sin(vP.z * 22.0 - uTime)));
+        vec3 col = uColor * (rim * 1.6 + bands * 0.12) + uStar * hex * 0.6;
+        gl_FragColor = vec4(col, rim * 0.9 + 0.08 + hex * 0.3);
+      }`,
+  });
+}

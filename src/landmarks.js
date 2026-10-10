@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { G, mesh, box, cyl, sphere } from './geo.js';
 import { toon, basic, signTex, wFlagTex } from './materials.js';
+import { Q } from './quality.js';
 
 function rng(seed) {
   let s = seed >>> 0 || 1;
@@ -38,7 +39,9 @@ export function getChrome() {
   const env = new THREE.CanvasTexture(c);
   env.mapping = THREE.EquirectangularReflectionMapping;
   env.colorSpace = THREE.SRGBColorSpace;
-  chromeMat = new THREE.MeshPhongMaterial({ color: 0xdfe6ee, envMap: env, reflectivity: 0.92, shininess: 140, specular: 0xffffff });
+  chromeMat = Q.pbr
+    ? new THREE.MeshStandardMaterial({ color: 0xeef2f6, metalness: 1, roughness: 0.05, envMapIntensity: 1.3 }) // reflects the live sky environment
+    : new THREE.MeshPhongMaterial({ color: 0xdfe6ee, envMap: env, reflectivity: 0.92, shininess: 140, specular: 0xffffff });
   return chromeMat;
 }
 
