@@ -88,8 +88,13 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - **Medium:** physically based materials and half-resolution bloom.
   - **Low:** cartoon shading with no post-processing or shadows.
   - Auto picks Medium on phones and High elsewhere.
-  - If the frame rate drops, ambient occlusion turns off first, then bloom, then the resolution drops.
-  - Static scenery and obstacles are merged per material to keep draw calls low. Every texture is pre-painted in the background while the menu is up, and shaders are compiled in parallel at boot, so streaming new city blocks doesn't stutter.
+  - Rendering is batched aggressively, with no visual cost:
+    - Solid-colored props are merged into one draw per city block, with their color baked into the vertices; buildings share facade materials via per-building UV tiling.
+    - Each runner's limbs are merged part by part.
+    - Coins are GPU-instanced (two draws for all of them); trains, boats and the Ferris wheel are merged.
+    - Grass stays out of the ambient-occlusion pass, and nothing is streamed in past the fog line.
+  - Textures are pre-painted while the menu is up, and shaders are compiled in parallel at boot, so streaming new blocks doesn't stutter.
+  - Adaptive quality works both ways: below ~48 fps it sheds one step at a time (render scale on high-DPI screens, then ambient occlusion, bloom and resolution), and it restores them once there's headroom.
 
 ## Studio ident
 

@@ -22,7 +22,7 @@ export const LANE_W = 2.4;
 export const LANES = [-LANE_W, 0, LANE_W];
 export const CHUNK_LEN = 30;
 export const SECTION_LEN = 750; // metres per neighbourhood
-const AHEAD = 270;
+const AHEAD = 250; // the fog is opaque by ~240 m: nothing further is ever seen
 
 export const THEMES = [
   { id: 'loop', name: 'The Loop', tag: 'Race the "L" between the skyscrapers' },
@@ -181,6 +181,8 @@ export class World {
     STYLE.uRimStrength.value = night ? 0.4 : 0.26;
     STYLE.uFill.value.set(night ? 0x2a3866 : 0x4a5468);
     this.playerLight.intensity = night ? 25 : 0;
+    // A zero-intensity light still costs every pixel a loop iteration: drop it by day.
+    this.playerLight.visible = night;
     setNight(night);
     this.snow.visible = snow;
     this.stars.visible = night;
@@ -384,6 +386,13 @@ export class World {
       }
       o.material = swapped.get(o.material);
     });
+    // merge the frame and the turning wheel into a handful of draws
+    const wheelBaked = bake(fw.wheel);
+    fw.group.remove(fw.wheel);
+    const frameBaked = bake(fw.group);
+    fw.group.clear();
+    fw.group.add(frameBaked, wheelBaked);
+    fw.wheel = wheelBaked;
     fw.group.position.set(118, 0, 10);
     fw.group.scale.setScalar(1.3);
     fw.group.rotation.y = -0.5;
@@ -581,6 +590,7 @@ export class World {
     const mat = toon(0xffffff, { map: f.map, emissive: 0xffffff, emissiveMap: f.emissiveMap, emissiveIntensity: 0, nightGlow: 0.42, roughness: style === 'glass' || style === 'dark' ? 0.25 : 0.85, metalness: style === 'glass' || style === 'dark' ? 0.35 : 0 });
     const roof = toon(style === 'glass' ? 0x5c7896 : 0x6b6f78);
     const b = new THREE.Mesh(G.box(), [mat, mat, roof, roof, mat, mat]);
+    b.userData.uvRepeat = f.repeat; // applied to the UVs by bake()
     b.scale.set(w, h, d);
     b.position.set(x, baseY + h / 2, z);
     g.add(b);
@@ -717,7 +727,7 @@ export class World {
     if (i % 4 === 2) {
       // Always slower than the runner, so you overtake it.
       const s = Math.random() < 0.5 ? -1 : 1;
-      const train = makeTrain(4, 11);
+      const train = bake(makeTrain(4, 11)); // ~160 parts -> a dozen draws
       train.rotation.y = Math.PI;
       train.position.set(s * 7.3, 0, -10);
       const speed = rand(8, 12.5);
@@ -960,7 +970,7 @@ export class World {
     // boats
     if (i % 2 === 0) {
       // dir 1 = cruising the same way as the runner, -1 = oncoming
-      const boat = Math.random() < 0.6 ? makeWaterTaxi() : makeTourBoat();
+      const boat = bake(Math.random() < 0.6 ? makeWaterTaxi() : makeTourBoat());
       const dir = Math.random() < 0.5 ? 1 : -1;
       boat.position.set(dir > 0 ? -10 : -16, -1.6, -rand(0, L));
       if (dir > 0) boat.rotation.y = Math.PI; // bow (+Z in the model) faces travel direction
@@ -1147,10 +1157,12 @@ export class World {
       tufts.setMatrixAt(k, m.compose(p, q, sc));
     }
     tufts.receiveShadow = true;
+    tufts.userData.noAO = true; // AO adds nothing visible on grass blades
     ctx.post.push(tufts);
     if (!flowers) return;
     const fn = Math.round(n * 0.18);
-    const fl = new THREE.InstancedMesh(G.sphere(6, 4), flowerMat(), fn);
+    const fl = new THREE.InstancedMesh(FLOWER_GEO, flowerMat(), fn);
+    fl.userData.noAO = true;
     const cols = [0xffffff, 0xffd43b, 0xff6b9a, 0xc77dff, 0xff8c42];
     const c = new THREE.Color();
     for (let k = 0; k < fn; k++) {
@@ -1207,7 +1219,7 @@ export class World {
     }
     // sailboats out on the lake, a lifeguard chair, and the zoo
     if (this.event !== 'snow') {
-      const boat = sailboat();
+      const boat = bake(sailboat());
       boat.position.set(-rand(30, 70), -0.3, -rand(0, L));
       boat.rotation.y = rand(-0.4, 0.4);
       const ph = rand(0, 6);
@@ -1237,6 +1249,7 @@ export class World {
 // Instanced grass: three crossed blades with a dark-to-light gradient, swaying
 // via a shared time uniform.
 const UP = new THREE.Vector3(0, 1, 0);
+const FLOWER_GEO = new THREE.OctahedronGeometry(0.5, 0); // 8 tris per flower head
 const GRASS_TIME = { value: 0 };
 let _grassGeo = null;
 let _grassMat = null;

@@ -142,4 +142,11 @@ export class Post {
     }
     return false;
   }
+
+  /** Toggle the expensive passes (used by the game's two-way adaptive quality). */
+  setPasses(ao, bloom) {
+    if (!this.enabled) return;
+    if (this.ao) this.ao.enabled = ao;
+    this.bloom.enabled = bloom;
+  }
 }

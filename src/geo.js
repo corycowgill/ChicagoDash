@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Q, segs } from './quality.js';
+import { vertexColorMat } from './materials.js';
 
 const geoCache = new Map();
 function cached(key, make) {
@@ -108,6 +109,11 @@ export function bake(group) {
   const buckets = new Map();
   const tmp = new THREE.Matrix4();
   const add = (mat, g, o) => {
+    // Plain colours share one vertex-coloured bucket per shading model.
+    if (mat.userData.plain) {
+      paintVertices(g, mat.color);
+      mat = vertexColorMat(mat);
+    }
     const key = mat.uuid + (o.receiveShadow ? 'r' : '') + (o.castShadow ? 'c' : '');
     if (!buckets.has(key)) buckets.set(key, { mat, geos: [], cast: o.castShadow, recv: o.receiveShadow });
     buckets.get(key).geos.push(g);
@@ -123,6 +129,12 @@ export function bake(group) {
     }
     tmp.multiplyMatrices(inv, o.matrixWorld);
     g.applyMatrix4(tmp);
+    if (o.userData.uvRepeat) {
+      // per-building texture tiling, so buildings can share one facade material
+      const [rx, ry] = o.userData.uvRepeat;
+      const uv = g.attributes.uv;
+      for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * rx, uv.getY(k) * ry);
+    }
     if (!Array.isArray(o.material)) {
       g.clearGroups();
       add(o.material, g, o);
@@ -158,6 +170,54 @@ export function bake(group) {
   }
   out.userData.baked = true;
   return out;
+}
+
+function paintVertices(g, color) {
+  const n = g.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = color.r;
+    arr[i * 3 + 1] = color.g;
+    arr[i * 3 + 2] = color.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+}
+
+/**
+ * Merge the plain-coloured meshes that are direct children of each node into
+ * one vertex-coloured mesh, in place. Used for rigs (the runners), where each
+ * limb group still animates but its parts become a single draw call.
+ */
+export function mergePlainChildren(root) {
+  const nodes = [];
+  root.traverse((o) => nodes.push(o));
+  for (const node of nodes) {
+    const kids = node.children.filter((c) => c.isMesh && !c.isInstancedMesh && !Array.isArray(c.material) && c.material.userData.plain && c.children.length === 0);
+    if (kids.length < 2) continue;
+    const buckets = new Map();
+    for (const c of kids) {
+      c.updateMatrix();
+      const g = c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone();
+      for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+      g.clearGroups();
+      g.applyMatrix4(c.matrix);
+      paintVertices(g, c.material.color);
+      const mat = vertexColorMat(c.material);
+      const key = mat.uuid + (c.castShadow ? 'c' : '');
+      if (!buckets.has(key)) buckets.set(key, { mat, geos: [], cast: c.castShadow, recv: c.receiveShadow });
+      buckets.get(key).geos.push(g);
+      node.remove(c);
+    }
+    for (const { mat, geos, cast, recv } of buckets.values()) {
+      const merged = mergeGeometries(geos, false);
+      geos.forEach((g) => g.dispose());
+      const m = new THREE.Mesh(merged, mat);
+      m.castShadow = cast;
+      m.receiveShadow = recv;
+      node.add(m);
+    }
+  }
+  return root;
 }
 
 /** Dispose geometries that are not shared/cached. */

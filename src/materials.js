@@ -124,6 +124,11 @@ export function toon(color, opts = {}) {
   } else {
     m = new THREE.MeshToonMaterial({ ...common, gradientMap: getGradient() });
   }
+  // "Plain" = a solid colour with no textures, glow or transparency. Plain
+  // meshes can be merged into one draw call with their colour baked into the
+  // vertices (see bake() and vertexColorMat()), which looks identical.
+  m.userData.plain = !opts.map && !opts.emissiveMap && !normalMap && !bump && opts.opacity === undefined
+    && opts.nightGlow === undefined && !opts.emissive;
   if (opts.nightGlow !== undefined) {
     // Materials that light up after dark: store day/night intensities.
     m.userData.dayGlow = (opts.emissiveIntensity ?? 0) * boost;
@@ -131,6 +136,24 @@ export function toon(color, opts = {}) {
     glowMaterials.add(m);
   }
   matCache.set(key, m);
+  return m;
+}
+
+/** Vertex-coloured twin of a plain material (same shading, colour from vertices). */
+const vcCache = new Map();
+export function vertexColorMat(src) {
+  const key = `${src.type}|${src.roughness ?? ''}|${src.metalness ?? ''}|${src.side}|${src.envMapIntensity ?? ''}|${src.userData.rimBoost ?? 1}`;
+  let m = vcCache.get(key);
+  if (m) return m;
+  if (src.isMeshStandardMaterial) {
+    m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: src.roughness, metalness: src.metalness, envMapIntensity: src.envMapIntensity, side: src.side });
+    m.userData.rimBoost = src.userData.rimBoost ?? 1;
+    m.onBeforeCompile = stylize;
+    m.customProgramCacheKey = () => 'stylized-v1';
+  } else {
+    m = new THREE.MeshToonMaterial({ color: 0xffffff, vertexColors: true, gradientMap: getGradient(), side: src.side });
+  }
+  vcCache.set(key, m);
   return m;
 }
 
@@ -340,25 +363,24 @@ export function facade(style, base, seed = 1) {
 }
 
 /** Facade textures tiled to a building's size (clones share the GPU image). */
+/**
+ * Facade texture plus how often it should tile on a face of the given size.
+ * The tiling is applied to the building's UVs when the block is merged, so
+ * every building with the same facade shares one material (one draw call).
+ */
 export function facadeTiled(style, base, seed, faceW, h) {
   const f = facade(style, base, seed);
+  for (const t of [f.map, f.emissiveMap]) {
+    if (t.wrapS !== THREE.RepeatWrapping) {
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.needsUpdate = true;
+    }
+  }
   const rows = style === 'brick' ? 6 : 12;
   const cols = style === 'brick' ? 4 : 6;
   const ry = Math.max(0.5, Math.round((h / (rows * 3.3)) * 2) / 2);
   const rx = Math.max(0.5, Math.round((faceW / (cols * 2.2)) * 2) / 2);
-  const key = `facade-tiled-${style}-${base}-${seed}-${rx}-${ry}`;
-  if (texCache.has(key)) return texCache.get(key);
-  const clone = (t) => {
-    const c = t.clone();
-    c.wrapS = c.wrapT = THREE.RepeatWrapping;
-    c.repeat.set(rx, ry);
-    c.needsUpdate = true;
-    if (BUMP.has(t)) BUMP.set(c, BUMP.get(t));
-    return c;
-  };
-  const out = { map: clone(f.map), emissiveMap: clone(f.emissiveMap) };
-  texCache.set(key, out);
-  return out;
+  return { map: f.map, emissiveMap: f.emissiveMap, repeat: [rx, ry] };
 }
 
 export function chicagoFlagTex() {

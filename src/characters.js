@@ -1,7 +1,7 @@
 // The four playable Chicago runners, built from primitives with a simple
 // pivot rig so they can run, jump, slide and celebrate.
 import * as THREE from 'three';
-import { G, mesh, box, sphere, shadows } from './geo.js';
+import { G, mesh, box, sphere, shadows, mergePlainChildren } from './geo.js';
 import { toon, basic, signTex, chicagoFlagTex } from './materials.js';
 import { Q } from './quality.js';
 
@@ -325,6 +325,8 @@ export function buildCharacter(id, outfitIdx = 0) {
     legs.push({ hip, knee, s });
   }
   shadows(root, true, false);
+  // ~80 parts -> ~25 draw calls: merge each limb's solid-colour pieces.
+  mergePlainChildren(root);
 
   let t = 0;
   let blink = false;

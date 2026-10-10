@@ -76,7 +76,7 @@ export class Spawner {
     this.scene = scene;
     this.obstacles = [];
     this.pickups = [];
-    this.coinPool = { gold: [], green: [] };
+    this.coins = new M.CoinField(scene);
     this.nextId = 1;
     this.reset();
   }
@@ -86,6 +86,7 @@ export class Spawner {
     for (const p of this.pickups) this.releasePickup(p);
     this.obstacles = [];
     this.pickups = [];
+    this.coins?.flush();
     this.nextRow = 45;
     this.rows = [];
     this.laneLast = [-99, -99, -99];
@@ -400,13 +401,10 @@ export class Spawner {
   }
 
   addCoin(lane, d, y) {
-    const green = this.greenCoins;
-    const pool = green ? this.coinPool.green : this.coinPool.gold;
-    let obj = pool.pop();
-    if (!obj) obj = M.makeCoin(green);
-    obj.visible = true;
+    const green = !!this.greenCoins;
+    const obj = new THREE.Object3D(); // transform proxy for the instanced coin
     obj.position.set(LANES[lane], y, -d);
-    this.scene.add(obj);
+    if (!this.coins.add(obj, green)) return;
     this.pickups.push({ type: 'coin', obj, x: LANES[lane], y, z: -d, phase: d * 0.3, green });
     this.laneLast[lane] = Math.max(this.laneLast[lane], d);
   }
@@ -438,15 +436,16 @@ export class Spawner {
   }
 
   releasePickup(p) {
+    if (p.type === 'coin') {
+      this.coins.remove(p.obj, p.green);
+      return;
+    }
     this.scene.remove(p.obj);
     for (const e of p.obj.userData.extras || []) {
       this.scene.remove(e);
       e.material.dispose();
     }
-    if (p.type === 'coin') {
-      p.obj.scale.setScalar(1);
-      (p.green ? this.coinPool.green : this.coinPool.gold).push(p.obj);
-    } else disposeObject(p.obj);
+    disposeObject(p.obj);
   }
 
   removePickup(p) {

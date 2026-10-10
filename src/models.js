@@ -7,6 +7,7 @@ import {
   shelterAdTex, marqueeTex, wFlagTex, nightGlowMat,
 } from './materials.js';
 import { Q, segs } from './quality.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const C = {
   orange: 0xff7a1a, white: 0xf7f7f2, red: 0xe63946, black: 0x23252b, steel: 0x8a96a3,
@@ -35,6 +36,19 @@ function getCoinGeo() {
     }
   }
   g.clearGroups();
+  if (Q.pbr) {
+    // Fold the milled rim into the same geometry: one draw call per coin.
+    // (The coin mesh is rotated/scaled, so pre-apply the inverse to the rim.)
+    const rim = new THREE.TorusGeometry(0.45, 0.045, segs(8), segs(28));
+    const uvr = rim.attributes.uv;
+    for (let i = 0; i < uvr.count; i++) uvr.setXY(i, 0.8, 0.5);
+    rim.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    rim.applyMatrix4(new THREE.Matrix4().makeScale(1 / 0.9, 1 / 0.14, 1 / 0.9));
+    const merged = mergeGeometries([g.toNonIndexed(), rim.toNonIndexed()]);
+    merged.userData.shared = true;
+    coinGeo.g = merged;
+    return merged;
+  }
   g.userData.shared = true;
   coinGeo.g = g;
   return g;
@@ -50,17 +64,62 @@ function coinMaterial(green) {
   return coinMats[green];
 }
 
+/**
+ * Every coin in the city drawn with GPU instancing: one draw call for all the
+ * gold coins and one for the green St. Patrick's coins. Gameplay keeps a
+ * lightweight Object3D per coin; flush() copies their transforms each frame.
+ */
+export class CoinField {
+  constructor(scene, capacity = 512) {
+    const geo = getCoinGeo().clone();
+    geo.applyMatrix4(new THREE.Matrix4().makeScale(0.9, 0.14, 0.9));
+    geo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+    this.sets = {};
+    for (const green of [false, true]) {
+      const mesh = new THREE.InstancedMesh(geo, coinMaterial(green), capacity);
+      mesh.count = 0;
+      mesh.frustumCulled = false; // instances move; the batch spans the whole run
+      scene.add(mesh);
+      this.sets[green] = { mesh, list: [] };
+    }
+    this.capacity = capacity;
+  }
+
+  add(obj, green) {
+    const s = this.sets[!!green];
+    if (s.list.length >= this.capacity) return false;
+    s.list.push(obj);
+    return true;
+  }
+
+  remove(obj, green) {
+    const l = this.sets[!!green].list;
+    const i = l.indexOf(obj);
+    if (i >= 0) {
+      l[i] = l[l.length - 1];
+      l.pop();
+    }
+  }
+
+  flush() {
+    for (const s of Object.values(this.sets)) {
+      const { mesh, list } = s;
+      for (let i = 0; i < list.length; i++) {
+        list[i].updateMatrix();
+        mesh.setMatrixAt(i, list[i].matrix);
+      }
+      mesh.count = list.length;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+}
+
 export function makeCoin(green = false) {
   const g = new THREE.Group();
   const m = new THREE.Mesh(getCoinGeo(), coinMaterial(green));
   m.rotation.x = Math.PI / 2;
   m.scale.set(0.9, 0.14, 0.9);
   g.add(m);
-  if (Q.pbr) {
-    // raised milled rim catches the light as the coin spins
-    const rim = new THREE.Mesh(G.torus(0.45, 0.045, 28), coinMaterial(green));
-    g.add(rim);
-  }
   return g;
 }
 

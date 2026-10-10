@@ -206,17 +206,33 @@ export class Game {
     this.adaptQuality(dt);
   }
 
+  /**
+   * Two-way adaptive quality. Every ~2 s of running we look at the average
+   * frame time: below ~48 fps we shed one step (a slightly lower render scale
+   * on high-DPI screens first, then AO, bloom and finally resolution); with
+   * steady headroom we restore one step. Fast machines never leave full quality.
+   */
   adaptQuality(dt) {
-    // If the device struggles, quietly drop resolution.
     if (this.state !== 'running') return;
     this.frameTimes.push(dt);
     if (this.frameTimes.length < 120) return;
     const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
     this.frameTimes = [];
-    const pr = this.renderer.getPixelRatio();
-    if (avg > 1 / 40 && this.post.disableBloom()) return;
-    if (avg > 1 / 40 && pr > 0.75) {
-      this.renderer.setPixelRatio(Math.max(0.75, pr - 0.25));
+    this.degrade ??= 0;
+    this.lastAdapt ??= 0;
+    const since = this.time - this.lastAdapt;
+    if (avg > 1 / 48 && this.degrade < 5) this.applyDegrade(this.degrade + 1);
+    else if (avg < 1 / 57 && this.degrade > 0 && since > 6) this.applyDegrade(this.degrade - 1);
+  }
+
+  applyDegrade(level) {
+    this.degrade = level;
+    this.lastAdapt = this.time;
+    const maxPr = Math.min(window.devicePixelRatio || 1, this.quality === 'high' ? 2 : this.quality === 'medium' ? 1.5 : 1);
+    const pr = [maxPr, Math.min(maxPr, 1.5), Math.min(maxPr, 1.5), Math.min(maxPr, 1.5), Math.min(maxPr, 1), 0.75][level];
+    this.post.setPasses(level < 2, level < 3);
+    if (Math.abs(this.renderer.getPixelRatio() - pr) > 0.01) {
+      this.renderer.setPixelRatio(pr);
       this.resize();
     }
   }
@@ -340,6 +356,7 @@ export class Game {
     this.world.update(dt, p.z, this.camera);
     this.collide(prevX);
     this.collectPickups(dt);
+    this.spawner.coins.flush(); // write coin transforms into the instanced batch
     if (this.state !== 'running') return;
 
     // neighbourhood transitions + milestones
