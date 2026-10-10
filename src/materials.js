@@ -6,6 +6,28 @@
 import * as THREE from 'three';
 import { Q } from './quality.js';
 
+// ---------------------------------------------------------------------------
+// Aerial perspective: replace three's flat distance fog, engine-wide, with one
+// that warms toward the sun and thins as you look up. Tower bases melt into the
+// haze while their crowns stay crisp, which gives the city real depth.
+THREE.ShaderChunk.fog_pars_vertex += '\n#ifdef USE_FOG\nvarying vec3 vFogDir;\n#endif\n';
+THREE.ShaderChunk.fog_vertex += '\n#ifdef USE_FOG\nvFogDir = (vec4(mvPosition.xyz, 0.0) * viewMatrix).xyz;\n#endif\n';
+THREE.ShaderChunk.fog_pars_fragment += '\n#ifdef USE_FOG\nvarying vec3 vFogDir;\n#endif\n';
+THREE.ShaderChunk.fog_fragment = `
+#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+  #else
+    float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+  #endif
+  vec3 fogDirN = normalize( vFogDir );
+  float sunward = pow( max( dot( fogDirN, normalize( vec3( -0.5, 0.25, -0.83 ) ) ), 0.0 ), 5.0 );
+  vec3 hazeColor = mix( fogColor, fogColor * vec3( 1.22, 1.04, 0.82 ), sunward );
+  fogFactor *= mix( 1.0, 0.55, smoothstep( 0.0, 0.45, fogDirN.y ) );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, hazeColor, fogFactor );
+#endif
+`;
+
 let gradientMap = null;
 function getGradient() {
   if (gradientMap) return gradientMap;
@@ -69,7 +91,8 @@ const GLOW_BOOST = 1.5;
  *   nightGlow, roughness, metalness, env, normalScale }
  */
 export function toon(color, opts = {}) {
-  const normalMap = opts.normalMap ?? opts.map?.userData?.normalMap ?? null;
+  const normalMap = opts.normalMap ?? null;
+  const bump = opts.map ? BUMP.get(opts.map) : undefined;
   const key = `${color}|${opts.emissive ?? ''}|${opts.emissiveIntensity ?? ''}|${opts.map?.uuid ?? ''}|${opts.emissiveMap?.uuid ?? ''}|${opts.opacity ?? ''}|${opts.nightGlow ?? ''}|${opts.side ?? ''}|${opts.roughness ?? ''}|${opts.metalness ?? ''}|${normalMap?.uuid ?? ''}|${opts.env ?? ''}|${opts.rim ?? ''}`;
   let m = matCache.get(key);
   if (m) return m;
@@ -92,6 +115,8 @@ export function toon(color, opts = {}) {
       envMapIntensity: opts.env ?? 1,
       normalMap,
       normalScale: new THREE.Vector2(opts.normalScale ?? 1, opts.normalScale ?? 1),
+      bumpMap: bump ? opts.map : null,
+      bumpScale: bump ? bump * 0.35 : 1,
     });
     m.userData.rimBoost = opts.rim ?? 1;
     m.onBeforeCompile = stylize;
@@ -161,42 +186,12 @@ export function setNight(isNight) {
 // ---------------------------------------------------------------------------
 const texCache = new Map();
 /**
- * Derive a tangent-space normal map from a painted canvas: darker pixels are
- * treated as lower (grout, mortar, window recesses, gravel gaps), so every
- * surface gets relief that matches its own artwork.
+ * Surface relief is derived on the GPU from each painted texture (bump mapping
+ * reads the colour map itself), so no pixels are ever read back on the CPU.
+ * Bump strength per texture lives here rather than in texture.userData, which
+ * three deep-copies through JSON on every clone.
  */
-function normalFromCanvas(src, strength, colorTex) {
-  const w = src.width;
-  const h = src.height;
-  const data = src.getContext('2d').getImageData(0, 0, w, h).data;
-  const lum = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) lum[i] = (data[i * 4] * 0.3 + data[i * 4 + 1] * 0.59 + data[i * 4 + 2] * 0.11) / 255;
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const og = out.getContext('2d');
-  const img = og.createImageData(w, h);
-  const at = (x, y) => lum[((y + h) % h) * w + ((x + w) % w)];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
-      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
-      const len = Math.hypot(dx, dy, 1);
-      const o = (y * w + x) * 4;
-      img.data[o] = (-dx / len * 0.5 + 0.5) * 255;
-      img.data[o + 1] = (dy / len * 0.5 + 0.5) * 255;
-      img.data[o + 2] = (1 / len * 0.5 + 0.5) * 255;
-      img.data[o + 3] = 255;
-    }
-  }
-  og.putImageData(img, 0, 0);
-  const n = new THREE.CanvasTexture(out);
-  n.anisotropy = Q.anisotropy;
-  n.wrapS = colorTex.wrapS;
-  n.wrapT = colorTex.wrapT;
-  n.repeat.copy(colorTex.repeat);
-  return n;
-}
+const BUMP = new WeakMap();
 
 function canvasTex(key, w, h, draw, { repeat = null, srgb = true, bump = 0 } = {}) {
   if (texCache.has(key)) return texCache.get(key);
@@ -212,7 +207,7 @@ function canvasTex(key, w, h, draw, { repeat = null, srgb = true, bump = 0 } = {
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
   }
-  if (bump && Q.pbr) t.userData.normalMap = normalFromCanvas(c, bump, t);
+  if (bump && Q.pbr) BUMP.set(t, bump);
   texCache.set(key, t);
   return t;
 }
@@ -240,7 +235,10 @@ export function facade(style, base, seed = 1) {
   const lit = [];
   const cw = W / cols;
   const rh = H / rows;
-  const map = canvasTex(key + '-map', W, H, (g) => {
+  // Painted in 512x1024 design units onto a half-size canvas: 4x cheaper to
+  // raster and still crisp on a building face with anisotropic filtering.
+  const map = canvasTex(key + '-map', W / 2, H / 2, (g) => {
+    g.scale(0.5, 0.5);
     g.fillStyle = base;
     g.fillRect(0, 0, W, H);
     // weathering: soft vertical streaks and grime near the bottom of each floor
@@ -321,7 +319,8 @@ export function facade(style, base, seed = 1) {
       }
     }
   }, { bump: 3 });
-  const emissiveMap = canvasTex(key + '-em', W, H, (g) => {
+  const emissiveMap = canvasTex(key + '-em', W / 2, H / 2, (g) => {
+    g.scale(0.5, 0.5);
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
     let i = 0;
@@ -354,7 +353,7 @@ export function facadeTiled(style, base, seed, faceW, h) {
     c.wrapS = c.wrapT = THREE.RepeatWrapping;
     c.repeat.set(rx, ry);
     c.needsUpdate = true;
-    if (t.userData.normalMap) c.userData = { normalMap: clone(t.userData.normalMap) };
+    if (BUMP.has(t)) BUMP.set(c, BUMP.get(t));
     return c;
   };
   const out = { map: clone(f.map), emissiveMap: clone(f.emissiveMap) };
@@ -657,54 +656,108 @@ export function stripesTex(a = '#e63946', b = '#ffffff', n = 6) {
 }
 
 export function trainFrontTex() {
-  return canvasTex('train-front', 256, 256, (g, w, h) => {
-    g.fillStyle = '#c7ccd3';
+  return canvasTex('train-front', 512, 512, (g, w, h) => {
+    const body = g.createLinearGradient(0, 0, w, 0);
+    body.addColorStop(0, '#aeb5be');
+    body.addColorStop(0.5, '#d9dee4');
+    body.addColorStop(1, '#aeb5be');
+    g.fillStyle = body;
     g.fillRect(0, 0, w, h);
+    // destination sign
     g.fillStyle = '#1b2735';
-    g.fillRect(28, 50, 86, 90); // windows
-    g.fillRect(142, 50, 86, 90);
-    g.fillStyle = '#2c3e57';
-    g.fillRect(0, 0, w, 36);
+    g.fillRect(0, 0, w, 74);
     g.fillStyle = '#ffb703';
-    g.font = 'bold 28px Arial, sans-serif';
+    g.font = 'bold 50px Arial, sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('Loop', w / 2, 19);
-    g.fillStyle = '#9aa3ad';
-    g.fillRect(118, 50, 20, 170); // door seam
-    g.fillStyle = '#fff6c4';
-    g.beginPath();
-    g.arc(40, 190, 13, 0, Math.PI * 2);
-    g.arc(216, 190, 13, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#ff3b30';
-    g.beginPath();
-    g.arc(72, 190, 8, 0, Math.PI * 2);
-    g.arc(184, 190, 8, 0, Math.PI * 2);
-    g.fill();
+    g.fillText('Loop', w / 2, 38);
+    // windshield panes with rubber gaskets and reflections
+    for (const x of [44, 284]) {
+      g.fillStyle = '#0f1620';
+      g.beginPath();
+      g.roundRect(x - 6, 96, 196, 196, 18);
+      g.fill();
+      const gl = g.createLinearGradient(x, 100, x + 184, 288);
+      gl.addColorStop(0, '#3d5875');
+      gl.addColorStop(0.45, '#1a2737');
+      gl.addColorStop(1, '#2b4058');
+      g.fillStyle = gl;
+      g.beginPath();
+      g.roundRect(x, 102, 184, 184, 14);
+      g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.18)';
+      g.beginPath();
+      g.moveTo(x + 20, 110); g.lineTo(x + 90, 110); g.lineTo(x + 30, 270); g.lineTo(x + 10, 270);
+      g.fill();
+    }
+    g.fillStyle = '#8b939c';
+    g.fillRect(236, 96, 40, 340); // door seam
+    // lamps, number plate and bumper stripes
+    for (const [x, c, r] of [[80, '#fff6c4', 26], [432, '#fff6c4', 26], [144, '#ff3b30', 15], [368, '#ff3b30', 15]]) {
+      g.fillStyle = '#2b2f36';
+      g.beginPath(); g.arc(x, 380, r + 6, 0, Math.PI * 2); g.fill();
+      g.fillStyle = c;
+      g.beginPath(); g.arc(x, 380, r, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = '#ffffff';
+    g.fillRect(206, 320, 100, 40);
+    g.fillStyle = '#1b2735';
+    g.font = 'bold 30px Arial, sans-serif';
+    g.fillText('3241', 256, 341);
     g.fillStyle = '#e4002b';
-    g.fillRect(0, 232, w, 10);
+    g.fillRect(0, 456, w, 22);
     g.fillStyle = '#4fa3e0';
-    g.fillRect(0, 242, w, 10);
-  });
+    g.fillRect(0, 478, w, 22);
+    g.fillStyle = '#2b2f36';
+    g.fillRect(0, 500, w, 12);
+  }, { bump: 1.5 });
 }
 
 export function trainSideTex() {
-  return canvasTex('train-side', 512, 128, (g, w, h) => {
-    g.fillStyle = '#c7ccd3';
+  return canvasTex('train-side', 1024, 256, (g, w, h) => {
+    const body = g.createLinearGradient(0, 0, 0, h);
+    body.addColorStop(0, '#e1e5ea');
+    body.addColorStop(0.55, '#c3c9d0');
+    body.addColorStop(1, '#9ea6af');
+    g.fillStyle = body;
     g.fillRect(0, 0, w, h);
-    g.fillStyle = '#b3b9c1';
-    for (let x = 0; x < w; x += 6) g.fillRect(x, 0, 1, h); // corrugation
-    g.fillStyle = '#1b2735';
-    for (let x = 20; x < w - 40; x += 70) g.fillRect(x, 24, 50, 40);
-    g.fillStyle = '#9aa3ad';
-    g.fillRect(w * 0.3, 20, 34, 92);
-    g.fillRect(w * 0.7, 20, 34, 92);
+    g.fillStyle = 'rgba(0,0,0,0.07)';
+    for (let x = 0; x < w; x += 8) g.fillRect(x, 150, 2, h - 150); // fluted lower panels
+    // windows with gaskets and interior silhouettes
+    for (let x = 40; x < w - 80; x += 140) {
+      if (Math.abs(x + 50 - w * 0.33) < 70 || Math.abs(x + 50 - w * 0.69) < 70) continue;
+      g.fillStyle = '#0f1620';
+      g.beginPath(); g.roundRect(x - 4, 40, 108, 84, 10); g.fill();
+      const gl = g.createLinearGradient(x, 44, x + 100, 120);
+      gl.addColorStop(0, '#4a6a8c');
+      gl.addColorStop(1, '#1b2a3c');
+      g.fillStyle = gl;
+      g.beginPath(); g.roundRect(x, 44, 100, 76, 8); g.fill();
+      g.fillStyle = 'rgba(20,25,35,0.6)';
+      g.beginPath(); g.arc(x + 35, 120, 16, Math.PI, 0); g.arc(x + 72, 120, 14, Math.PI, 0); g.fill(); // riders
+      g.fillStyle = 'rgba(255,255,255,0.22)';
+      g.fillRect(x + 8, 48, 16, 68);
+    }
+    // doors: two leaves, windows, rubber edges
+    for (const cx of [w * 0.33, w * 0.69]) {
+      g.fillStyle = '#9aa2ab';
+      g.fillRect(cx - 54, 30, 108, 206);
+      g.fillStyle = '#2b2f36';
+      g.fillRect(cx - 2, 30, 4, 206);
+      for (const dx of [-44, 8]) {
+        g.fillStyle = '#1b2a3c';
+        g.beginPath(); g.roundRect(cx + dx, 46, 36, 90, 6); g.fill();
+      }
+    }
+    // CTA-style stripes and the car number
     g.fillStyle = '#e4002b';
-    g.fillRect(0, 100, w, 8);
+    g.fillRect(0, 200, w, 14);
     g.fillStyle = '#4fa3e0';
-    g.fillRect(0, 108, w, 8);
-  });
+    g.fillRect(0, 214, w, 14);
+    g.fillStyle = '#1b2735';
+    g.font = 'bold 26px Arial, sans-serif';
+    g.fillText('3241', w - 110, 176);
+  }, { bump: 1.5 });
 }
 
 export function brickTex(base = '#a2472f') {

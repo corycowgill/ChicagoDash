@@ -73,9 +73,13 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - Cinematic split-tone grading: cool shadows, warm highlights.
   - Expressive runners: glossy eyes with colored irises and catch-lights that blink, mitten hands, hair tufts, and squash-and-stretch on jumps and landings.
   - Lush, wind-swaying instanced grass with wildflowers on the park lawns; zebra crosswalks and manhole covers on the streets.
+  - Sculpted runners: tapered hoodies with hoods, collars, cuffs and aglets; rolled jeans; a rounded backpack with straps, a zipper and a Chicago flag patch.
+  - Buildings with Chicago's black iron fire escapes, window A/C units, and setback crowns with spires and aircraft beacons on the towers.
+  - Aerial perspective: the haze warms toward the sun and thins as you look up, so tower bases melt into the distance; the skyline fades into the horizon.
+  - Detailed CTA car artwork: fluted panels, door leaves, riders in the windows and a lit destination sign.
   - Physically based materials lit by an environment baked from the sky, with filmic (ACES) tone mapping.
   - Post-processing: bloom on lights, signs and coins; color grading and vignette; a radial speed blur at high speed; and a red flash when you're hit.
-  - Normal maps generated from every painted texture, so mortar, pavers, window recesses and railroad ties catch the light.
+  - Surface relief derived on the GPU from every painted texture (bump mapping), so mortar, pavers, window recesses and railroad ties catch the light.
   - Glassy, rippling water; a sky dome with a sun glow; and soft, lumpy clouds.
   - High-poly models: rounded steel "L" cars with glass window bands, trucks and A/C units; polished metal coins; lathed cones, trash cans and lamp posts; organic tree canopies; and runners with eyebrows, noses, ears, cap buttons, drawstrings and laced sneakers.
   - Effects: dust and landing puffs, slide sparks, coin twinkles, power-up auras and light beams, speed lines, a shimmering shield bubble, and lamp halos with pools of light on the ground at night.
@@ -85,7 +89,7 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - **Low:** cartoon shading with no post-processing or shadows.
   - Auto picks Medium on phones and High elsewhere.
   - If the frame rate drops, ambient occlusion turns off first, then bloom, then the resolution drops.
-  - Static scenery and obstacles are merged per material to keep draw calls low.
+  - Static scenery and obstacles are merged per material to keep draw calls low. Every texture is pre-painted in the background while the menu is up, and shaders are compiled in parallel at boot, so streaming new city blocks doesn't stutter.
 
 ## Studio ident
 

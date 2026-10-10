@@ -1,6 +1,6 @@
 // Core runtime: renderer, runner physics, collisions, power-ups, camera.
 import * as THREE from 'three';
-import { World, LANES, THEMES, themeIndexAt, SECTION_LEN } from './world.js';
+import { World, LANES, THEMES, themeIndexAt, SECTION_LEN, textureJobs } from './world.js';
 import { Spawner } from './spawner.js';
 import { FX } from './fx.js';
 import { buildCharacter } from './characters.js';
@@ -77,8 +77,11 @@ export class Game {
     window.addEventListener('resize', () => this.resize());
     this.clock = new THREE.Clock();
     this.frameTimes = [];
+    this.warmJobs = textureJobs(); // painted a slice at a time while the menu is up
     this.loop = this.loop.bind(this);
     this.setupMenuScene();
+    // Compile the menu city's shaders in parallel up front instead of mid-run.
+    this.renderer.compileAsync?.(this.scene, this.camera).catch(() => {});
     requestAnimationFrame(this.loop);
   }
 
@@ -182,6 +185,12 @@ export class Game {
     requestAnimationFrame(this.loop);
     let dt = Math.min(this.clock.getDelta(), 1 / 20);
     this.time += dt;
+    if (this.warmJobs.length) {
+      // ~10 ms of texture painting per frame on the menu, one job per frame in a run
+      const budget = this.state === 'menu' ? 10 : 0;
+      const t0 = performance.now();
+      do this.warmJobs.shift()(); while (this.warmJobs.length && performance.now() - t0 < budget);
+    }
     if (this.state === 'running') this.updateRun(dt);
     else if (this.state === 'dying') this.updateDying(dt);
     else if (this.state === 'menu') this.updateMenu(dt);

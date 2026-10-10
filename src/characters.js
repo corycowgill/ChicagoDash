@@ -106,7 +106,15 @@ export function buildCharacter(id, outfitIdx = 0) {
   // Torso
   const torso = new THREE.Group();
   hips.add(torso);
-  torso.add(mesh(G.capsule(), hoodie, 0, 0.32, 0, 0.62, 0.38, 0.44));
+  // Sculpted torso: a lathed hoodie that tapers from chest to waist, slightly
+  // flattened front-to-back, with a ribbed hem band.
+  const chest = mesh(G.lathe('torso', [[0.001, -0.04], [0.25, -0.03], [0.275, 0.04], [0.29, 0.2], [0.305, 0.38], [0.3, 0.5], [0.26, 0.6], [0.16, 0.67], [0.001, 0.69]], 28), hoodie, 0, 0, 0);
+  chest.scale.set(1, 1, 0.74);
+  torso.add(chest);
+  const hem = mesh(G.torus(0.27, 0.03, 28), hoodie, 0, 0.0, 0);
+  hem.rotation.x = Math.PI / 2;
+  hem.scale.set(1, 0.74, 1);
+  torso.add(hem);
   if (id === 'southside') {
     const chi = new THREE.Mesh(G.plane(), basic(0xffffff, { map: letterTex('CHI', o.logo, null, 'bold 60px "Arial Black", Impact, sans-serif'), transparent: true }));
     chi.scale.set(0.42, 0.42, 1);
@@ -130,16 +138,35 @@ export function buildCharacter(id, outfitIdx = 0) {
   if (id === 'southside') {
     // hood up handled on head
   } else if (!isBear) {
-    torso.add(mesh(G.torus(0.2, 0.08, 12), hoodie, 0, 0.62, 0.04, 1, 1, 1));
-    // drawstrings and a kangaroo pocket
-    for (const x of [-0.07, 0.07]) torso.add(mesh(G.cyl(8), toon(0xf4f4f4), x, 0.48, -0.22, 0.025, 0.2, 0.025));
-    torso.add(mesh(G.rboxSized(0.34, 0.14, 0.04, 0.03), hoodie, 0, 0.18, -0.215));
-    torso.children.at(-1).rotation.x = Math.PI / 2;
+    const collar = mesh(G.torus(0.17, 0.06, 20), hoodie, 0, 0.64, 0.02);
+    collar.rotation.x = Math.PI / 2;
+    torso.add(collar);
+    // the hood bunched down the back
+    const hood = mesh(G.sphere(24, 16), hoodie, 0, 0.6, 0.2, 0.42, 0.3, 0.22);
+    hood.rotation.x = -0.4;
+    torso.add(hood);
+    // drawstrings with aglets and a kangaroo pocket
+    for (const x of [-0.07, 0.07]) {
+      torso.add(mesh(G.cyl(8), toon(0xf4f4f4), x, 0.5, -0.2, 0.022, 0.2, 0.022));
+      torso.add(mesh(G.cyl(8), toon(0xb9c2cc, { metalness: 0.7, roughness: 0.3 }), x, 0.39, -0.2, 0.03, 0.04, 0.03));
+    }
+    torso.add(mesh(G.rboxSized(0.36, 0.16, 0.05, 0.04), hoodie, 0, 0.16, -0.205));
   }
   // Backpack
   if (id === 'kid') {
-    torso.add(box(dark, 0.42, 0.46, 0.2, 0, 0.36, 0.3));
-    torso.add(box(toon(0x333333), 0.3, 0.16, 0.06, 0, 0.26, 0.42));
+    const pack = toon(0x23262d, { roughness: 0.7 });
+    torso.add(mesh(G.rboxSized(0.42, 0.48, 0.2, 0.08), pack, 0, 0.36, 0.3));
+    torso.add(mesh(G.rboxSized(0.32, 0.18, 0.08, 0.05), toon(0x353a44, { roughness: 0.7 }), 0, 0.24, 0.42));
+    torso.add(mesh(G.rboxSized(0.3, 0.015, 0.02, 0.006), toon(0xb9c2cc, { metalness: 0.8, roughness: 0.3 }), 0, 0.33, 0.461)); // zipper
+    for (const x of [-0.15, 0.15]) {
+      const strap = mesh(G.rboxSized(0.06, 0.62, 0.03, 0.015), pack, x, 0.36, -0.2);
+      strap.rotation.x = 0.05;
+      torso.add(strap);
+    }
+    const patch = new THREE.Mesh(G.plane(), basic(0xffffff, { map: chicagoFlagTex() }));
+    patch.scale.set(0.16, 0.1, 1);
+    patch.position.set(0.1, 0.45, 0.402);
+    torso.add(patch);
   }
 
   // Head
@@ -260,6 +287,11 @@ export function buildCharacter(id, outfitIdx = 0) {
     fore.position.y = -0.38;
     shoulder.add(fore);
     fore.add(mesh(G.capsule(), id === 'southside' || id === 'explorer' ? hoodie : (isBear ? skin : hoodie), 0, -0.13, 0, 0.15, 0.16, 0.15));
+    if (!isBear) {
+      const cuff = mesh(G.torus(0.075, 0.025, 16), hoodie, 0, -0.26, 0);
+      cuff.rotation.x = Math.PI / 2;
+      fore.add(cuff);
+    }
     // mitten hand with a thumb
     fore.add(mesh(G.sphere(16, 12), skin, 0, -0.34, 0, 0.21, 0.24, 0.18));
     fore.add(mesh(G.sphere(10, 8), skin, side * -0.07, -0.3, -0.05, 0.08, 0.11, 0.08));
@@ -276,6 +308,11 @@ export function buildCharacter(id, outfitIdx = 0) {
     knee.position.y = -0.4;
     hip.add(knee);
     knee.add(mesh(G.capsule(), isBear ? skin : pants, 0, -0.16, 0, 0.18, 0.2, 0.18));
+    if (!isBear) {
+      const roll = mesh(G.torus(0.088, 0.03, 16), pants, 0, -0.3, 0);
+      roll.rotation.x = Math.PI / 2;
+      knee.add(roll);
+    }
     const foot = new THREE.Group();
     foot.position.y = -0.36;
     knee.add(foot);

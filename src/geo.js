@@ -37,7 +37,7 @@ export const G = {
   foliage: (seed = 1) =>
     cached(`foliage-${seed}`, () => {
       // weld the polyhedron's split vertices so the canopy shades smoothly
-      const g = mergeVertices(new THREE.IcosahedronGeometry(0.5, Q.seg >= 2 ? 3 : Q.seg > 1 ? 2 : 1).deleteAttribute('uv').deleteAttribute('normal'));
+      const g = mergeVertices(new THREE.IcosahedronGeometry(0.5, Q.seg >= 1.5 ? 2 : 1).deleteAttribute('uv').deleteAttribute('normal'));
       const p = g.attributes.position;
       const v = new THREE.Vector3();
       for (let i = 0; i < p.count; i++) {

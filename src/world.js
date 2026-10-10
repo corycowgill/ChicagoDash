@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { G, mesh, box, cyl, sphere, bake, disposeObject } from './geo.js';
 import {
   toon, basic, facadeTiled, trackTex, paverTex, asphaltTex, grassTex, waterTex, brickTex, awningTex,
-  shopSignTex, marqueeTex, verticalChicagoTex, setNight, waterNormalTex, STYLE,
+  shopSignTex, marqueeTex, verticalChicagoTex, setNight, waterNormalTex, STYLE, trainSideTex, trainFrontTex, shelterAdTex,
 } from './materials.js';
 import { Q } from './quality.js';
 import {
@@ -60,6 +60,36 @@ function rand(a, b) {
 }
 function pick(arr) {
   return arr[(Math.random() * arr.length) | 0];
+}
+
+// Each facade style has its own palette (red brick stays red, glass stays blue),
+// which keeps the set of facade textures small enough to pre-generate.
+export const FACADE_PALETTE = {
+  glass: ['#4a7fb5', '#5c8fc4', '#3d6d9e'],
+  stone: ['#d9cdb4', '#c8bfae', '#e6dcc8'],
+  brick: ['#9c4a33', '#b5653d', '#a2472f', '#8f3b2a', '#7a4a3a', '#c2a27a'],
+  dark: ['#2e3442'],
+};
+const FACADE_SEEDS = 2;
+function facadePick(styles) {
+  const st = pick(styles);
+  return [st, pick(FACADE_PALETTE[st])];
+}
+
+/**
+ * Every texture the city can ask for, as small jobs. The game runs them a few
+ * milliseconds at a time while the menu is up, so nothing is painted mid-run.
+ */
+export function textureJobs() {
+  const jobs = [];
+  for (const [style, cols] of Object.entries(FACADE_PALETTE)) {
+    for (const c of cols) for (let s = 0; s < FACADE_SEEDS; s++) jobs.push(() => facadeTiled(style, c, s, 10, 30));
+  }
+  jobs.push(() => trackTex(), () => paverTex('#cdbfa6'), () => paverTex('#b8a888'), () => paverTex('#d7d1c4'), () => paverTex('#d8d4cc'),
+    () => asphaltTex(), () => grassTex('#6cc04a'), () => brickTex('#9a3a2a'), () => waterNormalTex());
+  for (const [label, col] of SHOPS) jobs.push(() => shopSignTex(label, col));
+  jobs.push(() => trainSideTex(), () => trainFrontTex(), () => verticalChicagoTex(), () => shelterAdTex(), () => brickTex('#a2472f'));
+  return jobs;
 }
 
 const STATIONS = ['Clark/Lake', 'State/Lake', 'Washington/Wabash', 'Adams/Wabash', 'Quincy', 'LaSalle/Van Buren', 'Harold Washington Library', 'Merchandise Mart'];
@@ -136,6 +166,7 @@ export class World {
     u.uSunColor.value.set(SKY[3]);
     u.uSunGlow.value = SKY[4];
     this.scene.background = new THREE.Color(SKY[2]);
+    this.skyHaze?.value.set(SKY[2]).lerp(new THREE.Color(SKY[1]), 0.25);
     this.updateEnvironment(SKY);
     this.scene.fog.color.set(night ? 0x1d2148 : snow ? 0xdfe6ee : ev === 'stpats' ? 0xd6f5e6 : 0xcfe9ff);
     this.scene.fog.near = snow ? 30 : 60;
@@ -245,8 +276,26 @@ export class World {
     const g = new THREE.Group();
     this.skylineMats = [];
     this.skylineWin = [];
+    // Distant towers: glossy, and fading into the horizon haze toward their
+    // bases (aerial perspective) so the skyline reads miles away, not as a backdrop.
+    this.skyHaze = { value: new THREE.Color(0xcfe6ff) };
+    const haze = this.skyHaze;
     const mk = (hex) => {
-      const m = new THREE.MeshToonMaterial({ color: hex, fog: false });
+      const m = Q.pbr
+        ? new THREE.MeshStandardMaterial({ color: hex, roughness: 0.35, metalness: 0.35, fog: false })
+        : new THREE.MeshToonMaterial({ color: hex, fog: false });
+      if (Q.pbr) {
+        m.onBeforeCompile = (sh) => {
+          sh.uniforms.uHaze = haze;
+          sh.vertexShader = sh.vertexShader
+            .replace('#include <common>', '#include <common>\nvarying float vWorldY;')
+            .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWorldY = (modelMatrix * vec4(transformed, 1.0)).y;');
+          sh.fragmentShader = sh.fragmentShader
+            .replace('#include <common>', '#include <common>\nuniform vec3 uHaze; varying float vWorldY;')
+            .replace('#include <opaque_fragment>', 'outgoingLight = mix(outgoingLight, uHaze, 0.28 + 0.5 * (1.0 - smoothstep(-12.0, 90.0, vWorldY)));\n#include <opaque_fragment>');
+        };
+        m.customProgramCacheKey = () => 'skyline-haze';
+      }
       m.userData.base = new THREE.Color(hex);
       this.skylineMats.push(m);
       return m;
@@ -528,7 +577,7 @@ export class World {
   building(g, x, z, w, h, d, style, color, seed, baseY = 0, storefront = false) {
     // A handful of facade variants per colour keeps textures + materials shared;
     // the street-facing side (depth d) sets the window tiling.
-    const f = facadeTiled(style, color, Math.abs(seed | 0) % 3, d, h);
+    const f = facadeTiled(style, color, Math.abs(seed | 0) % FACADE_SEEDS, d, h);
     const mat = toon(0xffffff, { map: f.map, emissive: 0xffffff, emissiveMap: f.emissiveMap, emissiveIntensity: 0, nightGlow: 0.42, roughness: style === 'glass' || style === 'dark' ? 0.25 : 0.85, metalness: style === 'glass' || style === 'dark' ? 0.35 : 0 });
     const roof = toon(style === 'glass' ? 0x5c7896 : 0x6b6f78);
     const b = new THREE.Mesh(G.box(), [mat, mat, roof, roof, mat, mat]);
@@ -557,7 +606,64 @@ export class World {
       g.add(mesh(G.cone(10), toon(0x5c3b1e), tx, baseY + h + 3.4, z, 2.0, 0.8, 2.0));
       for (const [dx, dz] of [[-0.6, -0.6], [0.6, -0.6], [-0.6, 0.6], [0.6, 0.6]]) g.add(box(toon(0x333333), 0.08, 1.4, 0.08, tx + dx, baseY + h + 0.7, z + dz));
     }
+    this.facadeDetail(g, x, z, w, h, d, style, baseY, storefront);
     return b;
+  }
+
+  /**
+   * Street-facing detail that sells the scale of a building: iron fire escapes
+   * on brick walk-ups, window A/C units, and setback crowns with spires and
+   * aircraft beacons on the towers.
+   */
+  facadeDetail(g, x, z, w, h, d, style, baseY, storefront) {
+    const dir = x > 0 ? -1 : 1; // the face looks toward the street (x = 0)
+    const faceX = x + dir * (w / 2);
+    const iron = toon(0x1f2228, { metalness: 0.6, roughness: 0.5 });
+    if ((style === 'brick' || style === 'stone') && h > 8 && Math.random() < 0.55) {
+      const fw = Math.min(3.4, d * 0.5);
+      const fz = z + rand(-d / 4, d / 4);
+      const px = faceX + dir * 0.48;
+      let prev = null;
+      for (let y = storefront ? 4.7 : 3.3; y < h - 1.2; y += 3.3) {
+        const yy = baseY + y;
+        g.add(box(iron, 0.95, 0.06, fw, px, yy, fz)); // landing
+        g.add(box(iron, 0.04, 0.04, fw, px + dir * 0.46, yy + 0.9, fz)); // top rail
+        for (let k = 0; k <= 6; k++) g.add(box(iron, 0.025, 0.9, 0.025, px + dir * 0.46, yy + 0.45, fz - fw / 2 + (k * fw) / 6)); // balusters
+        for (const e of [-1, 1]) g.add(box(iron, 0.95, 0.04, 0.04, px, yy + 0.9, fz + e * fw / 2));
+        if (prev !== null) {
+          // diagonal stair between landings
+          const st = box(iron, 0.5, 0.06, Math.hypot(fw * 0.8, 3.3), px, yy - 1.65, fz);
+          st.rotation.x = Math.atan2(3.3, fw * 0.8) * (prev % 2 ? 1 : -1);
+          g.add(st);
+        }
+        prev = (prev ?? 0) + 1;
+      }
+      // drop ladder below the first landing
+      g.add(box(iron, 0.04, 2.2, 0.04, px + dir * 0.3, baseY + (storefront ? 3.6 : 2.2), fz + fw / 2 - 0.3));
+      g.add(box(iron, 0.04, 2.2, 0.04, px + dir * 0.3, baseY + (storefront ? 3.6 : 2.2), fz + fw / 2 - 0.7));
+    }
+    if (style !== 'glass' && h > 7) {
+      const ac = toon(0xd9dde2, { roughness: 0.5, metalness: 0.3 });
+      const grill = toon(0x6b7078, { roughness: 0.6 });
+      const n = Math.floor(rand(2, 6));
+      for (let k = 0; k < n; k++) {
+        const y = baseY + 4.5 + Math.floor(rand(0, (h - 6) / 3.3)) * 3.3;
+        const zz = z + rand(-d / 2 + 0.6, d / 2 - 0.6);
+        g.add(box(ac, 0.42, 0.34, 0.6, faceX + dir * 0.21, y, zz));
+        g.add(box(grill, 0.02, 0.24, 0.48, faceX + dir * 0.43, y, zz));
+      }
+    }
+    if ((style === 'glass' || style === 'dark') && h > 34 && baseY < -5) {
+      // setback crown and (sometimes) a spire with a red aircraft beacon
+      const top = baseY + h;
+      const crownMat = toon(style === 'dark' ? 0x2a3142 : 0x8fb3d6, { roughness: 0.3, metalness: 0.5, emissive: 0xbfe3ff, emissiveIntensity: 0, nightGlow: 0.35 });
+      g.add(box(crownMat, w * 0.72, 5, d * 0.72, x, top + 2.5, z));
+      g.add(box(crownMat, w * 0.45, 4, d * 0.45, x, top + 7, z));
+      if (Math.random() < 0.5) {
+        g.add(cyl(toon(0x9aa4ae, { metalness: 0.8, roughness: 0.3 }), 0.12, 9, x, top + 13.5, z, 8));
+        g.add(sphere(toon(0xff2a2a, { emissive: 0xff0000, emissiveIntensity: 0.6, nightGlow: 4 }), 0.25, x, top + 18.1, z));
+      }
+    }
   }
 
   buildGateway(ctx, name) {
@@ -638,8 +744,7 @@ export class World {
         const d = rand(8, 13);
         const w = rand(8, 13);
         const h = rand(22, 55);
-        const style = pick(['glass', 'stone', 'glass', 'dark', 'brick']);
-        const col = style === 'glass' ? pick(['#4a7fb5', '#5c8fc4', '#3d6d9e']) : style === 'brick' ? pick(['#9c4a33', '#b5653d']) : style === 'dark' ? '#2e3442' : pick(['#d9cdb4', '#c8bfae', '#e6dcc8']);
+        const [style, col] = facadePick(['glass', 'stone', 'glass', 'dark', 'brick']);
         this.building(g, s * (11 + w / 2 + rand(0, 3)), -z - d / 2, w, h, d, style, col, (i * 7 + z) | 0, -12);
         z += d + rand(0.5, 2);
       }
@@ -690,7 +795,8 @@ export class World {
     for (let z = 0; z < L; ) {
       const d = rand(8, 12);
       const h = rand(22, 58);
-      this.building(g, 25 + rand(0, 2), -z - d / 2, 12, h, d, pick(['stone', 'stone', 'brick', 'glass']), pick(['#e6dcc8', '#d9cdb4', '#b5653d', '#5c8fc4']), (i * 5 + z) | 0, -0.03);
+      const [st, co] = facadePick(['stone', 'stone', 'brick', 'glass']);
+      this.building(g, 25 + rand(0, 2), -z - d / 2, 12, h, d, st, co, (i * 5 + z) | 0, -0.03);
       z += d + 0.4;
     }
     for (let z = 5; z < L; z += 10) {
@@ -805,7 +911,8 @@ export class World {
       g.add(mc);
     } else for (let z = 0; z < L; z += 11) {
       const h = rand(18, 50);
-      this.building(g, -60, -z - 5, 12, h, 10, pick(['glass', 'stone', 'brick']), pick(['#4a7fb5', '#d9cdb4', '#a2472f', '#5c8fc4']), i * 3 + z, -1.6);
+      const [st, co] = facadePick(['glass', 'stone', 'brick']);
+      this.building(g, -60, -z - 5, 12, h, 10, st, co, i * 3 + z, -1.6);
     }
     // right side: planters, lamps, benches, then building facades
     for (let z = 3; z < L; z += 10) {
@@ -820,7 +927,8 @@ export class World {
       const d = rand(9, 13);
       const w = 10;
       const h = rand(14, 40);
-      this.building(g, 15 + rand(0, 2), -z - d / 2, w, h, d, pick(['stone', 'glass', 'brick']), pick(['#e6dcc8', '#c8bfae', '#5c8fc4', '#b5653d']), i * 11 + z | 0);
+      const [st, co] = facadePick(['stone', 'glass', 'brick']);
+      this.building(g, 15 + rand(0, 2), -z - d / 2, w, h, d, st, co, i * 11 + z | 0);
       z += d + 0.6;
     }
     // bascule bridge every third chunk, spanning river and path
@@ -911,7 +1019,7 @@ export class World {
       while (z < L) {
         const w = rand(6, 8);
         const h = rand(9, 14);
-        const brickCol = pick(['#a2472f', '#8f3b2a', '#b5653d', '#7a4a3a', '#c2a27a']);
+        const brickCol = pick(FACADE_PALETTE.brick);
         const x = s * (8 + 3);
         const b = this.building(g, x, -z - w / 2, 6, h, w, 'brick', brickCol, (i * 13 + z) | 0, 0.18, true);
         if (s === -1 && local >= 3 && local <= 6) {

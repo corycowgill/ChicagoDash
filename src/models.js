@@ -393,10 +393,6 @@ export function makeTrain(cars = 1, carLen = 11) {
     const body = new THREE.Mesh(G.rboxSized(2.1, H, carLen, 0.16), [side, side, roof, under, front, front]);
     body.position.set(0, 0.4 + H / 2, z);
     g.add(body);
-    // tinted window band down each side
-    for (const sx of [-1.056, 1.056]) {
-      for (let k = 0; k < 6; k++) g.add(mesh(G.rboxSized(0.02, 0.62, 1.05, 0.01), glass, sx, 1.75, z - carLen / 2 + 1 + k * ((carLen - 2) / 5)));
-    }
     // roof: ribbed panels and two A/C units
     for (let k = 0; k < 8; k++) g.add(mesh(G.rboxSized(1.8, 0.05, 0.08, 0.02), roof, 0, TRAIN_H + 0.01, z - carLen / 2 + 0.7 + k * ((carLen - 1.4) / 7)));
     for (const dz of [-carLen / 4, carLen / 4]) g.add(mesh(G.rboxSized(1.2, 0.22, 1.6, 0.08), steel, 0, TRAIN_H + 0.11, z + dz));
@@ -577,7 +573,7 @@ export function makeFallenBranch() {
 // ---------------------------------------------------------------------------
 function lampHead(g, x, y, z, big = 1) {
   // Lantern: glowing globe, a halo for the bloom pass and a pool of light on the ground at night.
-  g.add(mesh(G.sphere(20, 16), toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.35, nightGlow: 3.2, roughness: 0.15 }), x, y, z, 0.52 * big, 0.52 * big, 0.52 * big));
+  g.add(mesh(G.sphere(12, 10), toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.35, nightGlow: 3.2, roughness: 0.15 }), x, y, z, 0.52 * big, 0.52 * big, 0.52 * big));
   const h1 = mesh(G.plane(), nightGlowMat(0xffd27a, 0.5), x, y, z, 1.6 * big, 1.6 * big, 1);
   const h2 = h1.clone();
   h2.rotation.y = Math.PI / 2;
