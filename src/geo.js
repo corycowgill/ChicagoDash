@@ -164,5 +164,6 @@ export function bake(group) {
 export function disposeObject(obj) {
   obj.traverse((o) => {
     if (o.isMesh && o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
+    if (o.isInstancedMesh) o.dispose(); // frees the per-instance GPU buffers
   });
 }

@@ -22,6 +22,42 @@ const matCache = new Map();
 /** Night-sensitive materials (glowing windows, bulbs, signs). */
 export const glowMaterials = new Set();
 
+/**
+ * Stylized shading shared by every physically based material: a sky-tinted
+ * fresnel rim that makes silhouettes pop (the signature of stylized AAA
+ * games), plus a soft terminator so shadows fall off gently instead of
+ * snapping to black. Uniforms are shared, so changing the mood is instant.
+ */
+export const STYLE = {
+  uRimColor: { value: new THREE.Color(0.75, 0.88, 1.0) },
+  uRimStrength: { value: 0.26 },
+  uRimPower: { value: 2.6 },
+  uFill: { value: new THREE.Color(0.32, 0.38, 0.5) },
+};
+
+function stylize(shader) {
+  shader.uniforms.uRimColor = STYLE.uRimColor;
+  shader.uniforms.uRimStrength = STYLE.uRimStrength;
+  shader.uniforms.uRimPower = STYLE.uRimPower;
+  shader.uniforms.uFill = STYLE.uFill;
+  shader.uniforms.uRimBoost = { value: this.userData.rimBoost ?? 1 };
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform vec3 uRimColor; uniform float uRimStrength; uniform float uRimPower; uniform vec3 uFill; uniform float uRimBoost;')
+    .replace(
+      '#include <opaque_fragment>',
+      `{
+        vec3 vdir = normalize(vViewPosition);
+        float ndv = saturate(dot(normal, vdir));
+        float rim = pow(1.0 - ndv, uRimPower) * uRimStrength * uRimBoost;
+        // soft cool fill lifts the shadow side so it reads as coloured, not black
+        float lum = dot(outgoingLight, vec3(0.299, 0.587, 0.114));
+        outgoingLight += diffuseColor.rgb * uFill * (1.0 - smoothstep(0.0, 0.06, lum)) * 0.25;
+        outgoingLight += uRimColor * rim * (0.6 + 0.4 * diffuseColor.rgb);
+      }
+      #include <opaque_fragment>`,
+    );
+}
+
 // Under filmic tone mapping glows need more energy to read (and to bloom).
 const GLOW_BOOST = 1.5;
 
@@ -34,7 +70,7 @@ const GLOW_BOOST = 1.5;
  */
 export function toon(color, opts = {}) {
   const normalMap = opts.normalMap ?? opts.map?.userData?.normalMap ?? null;
-  const key = `${color}|${opts.emissive ?? ''}|${opts.emissiveIntensity ?? ''}|${opts.map?.uuid ?? ''}|${opts.emissiveMap?.uuid ?? ''}|${opts.opacity ?? ''}|${opts.nightGlow ?? ''}|${opts.side ?? ''}|${opts.roughness ?? ''}|${opts.metalness ?? ''}|${normalMap?.uuid ?? ''}|${opts.env ?? ''}`;
+  const key = `${color}|${opts.emissive ?? ''}|${opts.emissiveIntensity ?? ''}|${opts.map?.uuid ?? ''}|${opts.emissiveMap?.uuid ?? ''}|${opts.opacity ?? ''}|${opts.nightGlow ?? ''}|${opts.side ?? ''}|${opts.roughness ?? ''}|${opts.metalness ?? ''}|${normalMap?.uuid ?? ''}|${opts.env ?? ''}|${opts.rim ?? ''}`;
   let m = matCache.get(key);
   if (m) return m;
   const boost = Q.pbr ? GLOW_BOOST : 1;
@@ -57,6 +93,9 @@ export function toon(color, opts = {}) {
       normalMap,
       normalScale: new THREE.Vector2(opts.normalScale ?? 1, opts.normalScale ?? 1),
     });
+    m.userData.rimBoost = opts.rim ?? 1;
+    m.onBeforeCompile = stylize;
+    m.customProgramCacheKey = () => 'stylized-v1';
   } else {
     m = new THREE.MeshToonMaterial({ ...common, gradientMap: getGradient() });
   }

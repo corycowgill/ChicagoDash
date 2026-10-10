@@ -148,6 +148,7 @@ export function buildCharacter(id, outfitIdx = 0) {
   torso.add(head);
   const headR = isBear ? 0.36 : 0.33;
   head.add(sphere(skin, headR, 0, 0, 0));
+  const eyes = [];
   // eyes (face is -Z)
   if (id === 'southside') {
     head.add(box(dark, 0.5, 0.11, 0.06, 0, 0.04, -0.3));
@@ -155,10 +156,21 @@ export function buildCharacter(id, outfitIdx = 0) {
     head.add(mesh(G.hemi(), cap, 0, 0.02, 0.03, 0.78, 0.75, 0.78)); // hood
     head.add(mesh(G.torus(0.3, 0.07, 14), cap, 0, 0, -0.06, 1, 1.05, 1));
   } else {
+    // Stylized eyes: glossy sclera, coloured iris, pupil and two catch-lights.
+    // Each eye is a group so it can blink.
+    const irisCol = { kid: 0x6b3e1f, explorer: 0x2f8f5a, bear: 0x2a1a10 }[id] ?? 0x6b3e1f;
+    const iris = toon(irisCol, { roughness: 0.15 });
+    const sclera = toon(0xfbfbf7, { roughness: 0.2 });
     for (const x of [-0.12, 0.12]) {
-      head.add(sphere(white, 0.075, x, 0.03, -headR + 0.04));
-      head.add(sphere(dark, 0.045, x, 0.03, -headR - 0.005));
-      head.add(sphere(white, 0.014, x + 0.015, 0.05, -headR - 0.045)); // catch-light
+      const eye = new THREE.Group();
+      eye.position.set(x, 0.03, -headR + 0.035);
+      eye.add(mesh(G.sphere(20, 16), sclera, 0, 0, 0, 0.17, 0.2, 0.12));
+      eye.add(mesh(G.sphere(18, 14), iris, x * 0.08, -0.005, -0.05, 0.105, 0.12, 0.05));
+      eye.add(mesh(G.sphere(14, 10), dark, x * 0.08, -0.005, -0.068, 0.055, 0.065, 0.03));
+      eye.add(sphere(white, 0.016, x * 0.08 + 0.02, 0.025, -0.082));
+      eye.add(sphere(white, 0.008, x * 0.08 - 0.015, -0.025, -0.08));
+      head.add(eye);
+      eyes.push(eye);
       if (!isBear) {
         const brow = mesh(G.rboxSized(0.1, 0.022, 0.03, 0.01), toon(id === 'explorer' ? 0x6b3e1f : 0x3b2a20), x, 0.12, -headR + 0.02);
         brow.rotation.z = x > 0 ? -0.15 : 0.15;
@@ -209,7 +221,16 @@ export function buildCharacter(id, outfitIdx = 0) {
     head.add(capG);
     if (!isBear) {
       // hair peeking out
-      head.add(mesh(G.sphere(), toon(id === 'explorer' ? 0x6b3e1f : 0x3b2a20), 0, 0.02, 0.12, headR * 2.05, headR * 1.6, headR * 1.8));
+      head.add(mesh(G.sphere(), toon(id === 'explorer' ? 0x7a4a26 : 0x5a3b26, { roughness: 0.55 }), 0, 0.02, 0.12, headR * 2.05, headR * 1.6, headR * 1.8));
+    }
+    if (id === 'kid') {
+      // a few tufts of hair poking out under the cap
+      const hair = toon(0x5a3b26, { roughness: 0.55 });
+      for (const [x, z, r] of [[-0.24, -0.12, 0.6], [0.24, -0.12, -0.6], [-0.27, 0.05, 0.9], [0.27, 0.05, -0.9]]) {
+        const tuft = mesh(G.cone(10), hair, x, -0.04, z, 0.1, 0.16, 0.1);
+        tuft.rotation.z = r;
+        head.add(tuft);
+      }
     }
     if (id === 'explorer') {
       const pony = new THREE.Group();
@@ -230,6 +251,7 @@ export function buildCharacter(id, outfitIdx = 0) {
   // Arms
   const arms = [];
   for (const s of [-1, 1]) {
+    const side = s;
     const shoulder = new THREE.Group();
     shoulder.position.set(s * 0.36, 0.55, 0);
     torso.add(shoulder);
@@ -238,7 +260,9 @@ export function buildCharacter(id, outfitIdx = 0) {
     fore.position.y = -0.38;
     shoulder.add(fore);
     fore.add(mesh(G.capsule(), id === 'southside' || id === 'explorer' ? hoodie : (isBear ? skin : hoodie), 0, -0.13, 0, 0.15, 0.16, 0.15));
-    fore.add(sphere(skin, 0.1, 0, -0.33, 0));
+    // mitten hand with a thumb
+    fore.add(mesh(G.sphere(16, 12), skin, 0, -0.34, 0, 0.21, 0.24, 0.18));
+    fore.add(mesh(G.sphere(10, 8), skin, side * -0.07, -0.3, -0.05, 0.08, 0.11, 0.08));
     arms.push({ shoulder, fore, s });
   }
   // Legs
@@ -269,8 +293,19 @@ export function buildCharacter(id, outfitIdx = 0) {
   let blink = false;
   const state = { root, body, hips, torso, head, arms, legs, def, outfit: o };
 
+  let blinkT = 2 + Math.random() * 2;
   function update(dt, s) {
     t += dt * (s.mode === 'idle' ? 1 : s.runRate ?? 1);
+    // blink every few seconds
+    blinkT -= dt;
+    const shut = blinkT < 0.12;
+    if (blinkT < 0) blinkT = 2.2 + Math.random() * 2.5;
+    for (const e of eyes) e.scale.y = shut ? 0.12 : 1;
+    // squash & stretch: stretch on the way up, squash on landing
+    const v = Math.max(-1, Math.min(1, s.vy ?? 0));
+    let sy = 1 + (s.mode === 'jump' ? v * 0.1 : 0);
+    if ((s.landT ?? 1) < 0.16) sy -= 0.16 * (1 - s.landT / 0.16);
+    root.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
     const ph = t * 11;
     body.rotation.set(0, 0, 0);
     body.position.set(0, 0, 0);

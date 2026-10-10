@@ -66,7 +66,13 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - 3 daily challenges, the same for everyone on a given date, with rewards paid automatically.
   - Spend coins to keep running after a crash.
 - **Audio**: synthesized sound effects and a procedural chiptune loop that speeds up as you do. Everything is WebAudio, with no asset files.
-- **Graphics**:
+- **Graphics** (a stylized look in the spirit of AAA games like Fortnite and Overwatch):
+  - Stylized shading on every material: a sky-tinted rim light that makes silhouettes pop, and a soft cool fill that keeps shadows colored rather than black.
+  - Golden-hour key light with cool sky fill and warm ground bounce, and longer, dramatic shadows.
+  - Ground-truth ambient occlusion (High), so props and corners sit in the world.
+  - Cinematic split-tone grading: cool shadows, warm highlights.
+  - Expressive runners: glossy eyes with colored irises and catch-lights that blink, mitten hands, hair tufts, and squash-and-stretch on jumps and landings.
+  - Lush, wind-swaying instanced grass with wildflowers on the park lawns; zebra crosswalks and manhole covers on the streets.
   - Physically based materials lit by an environment baked from the sky, with filmic (ACES) tone mapping.
   - Post-processing: bloom on lights, signs and coins; color grading and vignette; a radial speed blur at high speed; and a red flash when you're hit.
   - Normal maps generated from every painted texture, so mortar, pavers, window recesses and railroad ties catch the light.
@@ -74,11 +80,11 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - High-poly models: rounded steel "L" cars with glass window bands, trucks and A/C units; polished metal coins; lathed cones, trash cans and lamp posts; organic tree canopies; and runners with eyebrows, noses, ears, cap buttons, drawstrings and laced sneakers.
   - Effects: dust and landing puffs, slide sparks, coin twinkles, power-up auras and light beams, speed lines, a shimmering shield bubble, and lamp halos with pools of light on the ground at night.
 - **Graphics quality** (Settings → Graphics):
-  - **High:** everything above at full resolution, with 4× MSAA and 2048 px shadows.
+  - **High:** everything above at full resolution, with ambient occlusion, 4× MSAA and 2048 px shadows.
   - **Medium:** physically based materials and half-resolution bloom.
   - **Low:** cartoon shading with no post-processing or shadows.
   - Auto picks Medium on phones and High elsewhere.
-  - If the frame rate drops, bloom turns off first, then the resolution drops.
+  - If the frame rate drops, ambient occlusion turns off first, then bloom, then the resolution drops.
   - Static scenery and obstacles are merged per material to keep draw calls low.
 
 ## Studio ident

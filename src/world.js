@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { G, mesh, box, cyl, sphere, bake, disposeObject } from './geo.js';
 import {
   toon, basic, facadeTiled, trackTex, paverTex, asphaltTex, grassTex, waterTex, brickTex, awningTex,
-  shopSignTex, marqueeTex, verticalChicagoTex, setNight, waterNormalTex,
+  shopSignTex, marqueeTex, verticalChicagoTex, setNight, waterNormalTex, STYLE,
 } from './materials.js';
 import { Q } from './quality.js';
 import {
@@ -93,9 +93,10 @@ export class World {
 
   // -------------------------------------------------------------------------
   setupLights() {
-    this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x6b5a4a, 1.1);
+    // cool sky fill from above, warm bounce from the pavement below
+    this.hemi = new THREE.HemisphereLight(0xa9d2ff, 0x8a6a4a, 1.1);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+    this.sun = new THREE.DirectionalLight(0xffe0b0, 2.2);
     this.sun.position.set(-12, 30, 10);
     this.sun.castShadow = Q.shadows;
     const s = this.sun.shadow;
@@ -141,9 +142,13 @@ export class World {
     this.scene.fog.far = snow ? 160 : 240;
     // With an environment map providing ambient light, the hemi light is a fill.
     this.hemi.intensity = night ? 0.6 : (snow ? 1.3 : 1.15) * (this.pmrem ? 0.45 : 1);
-    this.hemi.color.set(night ? 0x6b7bd6 : 0xcfe8ff);
+    this.hemi.color.set(night ? 0x6b7bd6 : 0xa9d2ff);
     this.sun.intensity = (night ? 0.35 : snow ? 1.2 : 2.3) * (this.pmrem ? 1.25 : 1);
-    this.sun.color.set(night ? 0x8fa2ff : 0xfff1d6);
+    // golden-hour key light; moonlight at night
+    this.sun.color.set(night ? 0x8fa2ff : snow ? 0xf2f4ff : 0xffdcaa);
+    STYLE.uRimColor.value.set(night ? 0x7f9cff : snow ? 0xe8f0ff : ev === 'stpats' ? 0xc8ffd8 : 0xbfe0ff);
+    STYLE.uRimStrength.value = night ? 0.4 : 0.26;
+    STYLE.uFill.value.set(night ? 0x2a3866 : 0x4a5468);
     this.playerLight.intensity = night ? 25 : 0;
     setNight(night);
     this.snow.visible = snow;
@@ -199,6 +204,7 @@ export class World {
     });
     this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(700, 32, 16), mat);
     this.skyDome.frustumCulled = false;
+    this.skyDome.userData.noAO = true;
     this.skyDome.renderOrder = -10;
     this.scene.add(this.skyDome);
   }
@@ -447,8 +453,10 @@ export class World {
     this.waterMat[wm].offset.set((this.time * 0.02) % 1, (this.time * 0.12) % 1);
     this.lakeMat[wm].offset.set((this.time * 0.025) % 1, (this.time * 0.01) % 1);
     this.skyDome.position.copy(camera.position);
+    GRASS_TIME.value = this.time;
     // shadow camera follows the runner
-    this.sun.position.set(-12, 30, playerZ + 6);
+    // a lower sun throws longer, more dramatic shadows
+    this.sun.position.set(-16, 22, playerZ + 10);
     this.sun.target.position.set(0, 0, playerZ - 8);
     this.playerLight.position.set(0, 5, playerZ - 3);
     if (this.snow.visible) {
@@ -482,7 +490,7 @@ export class World {
     const local = Math.floor((dist % SECTION_LEN) / CHUNK_LEN); // chunk index within the section
     const g = new THREE.Group();
     const animated = [];
-    const ctx = { g, animated, i, local, z0 };
+    const ctx = { g, animated, i, local, z0, post: [] };
     if (theme === 'loop') this.buildLoop(ctx);
     else if (theme === 'millennium') this.buildMillennium(ctx);
     else if (theme === 'riverwalk') this.buildRiverwalk(ctx);
@@ -497,6 +505,7 @@ export class World {
     }
     const baked = bake(g);
     baked.position.z = z0;
+    for (const o of ctx.post) baked.add(o); // instanced detail can't be merged
     this.root.add(baked);
     for (const a of animated) {
       a.obj.position.z += z0;
@@ -664,8 +673,13 @@ export class World {
 
   // -------------------------------------------------------------------------
   // MILLENNIUM PARK — the Bean, Crown Fountain, Pritzker, Buckingham, the lions
-  buildMillennium({ g, animated, i, local }) {
+  buildMillennium(ctx) {
+    const { g, animated, i, local } = ctx;
     const L = CHUNK_LEN;
+    // keep the lawn out of the landmark plazas
+    if ([2, 5, 9, 13, 17].includes(local)) this.addGrass(ctx, -7.5, -4.6, 260);
+    else this.addGrass(ctx, -40, -4.6, 1400);
+    this.addGrass(ctx, 4.6, 10, 260, false);
     const snow = this.event === 'snow';
     this.ground(g, toon(0xffffff, { map: paverTex(snow ? '#eeeeee' : '#d8d4cc') }), 8.6);
     const grass = toon(0xffffff, { map: grassTex(snow ? '#e9eef3' : '#6cc04a') });
@@ -864,7 +878,19 @@ export class World {
   // WRIGLEYVILLE — storefronts, the ballpark, game-day crowds
   buildWrigley({ g, animated, i, local }) {
     const L = CHUNK_LEN;
-    this.ground(g, toon(0xffffff, { map: asphaltTex() }), 7.6);
+    this.ground(g, toon(0xffffff, { map: asphaltTex(), roughness: 0.92 }), 7.6);
+    if (local % 4 === 2) {
+      // zebra crosswalk and a stop line
+      const paint = toon(0xf2efe4, { roughness: 0.55 });
+      for (let x = -3.3; x <= 3.31; x += 0.82) g.add(box(paint, 0.5, 0.02, 3, x, 0.012, -26));
+      g.add(box(paint, 7.4, 0.02, 0.35, 0, 0.012, -23.6));
+    }
+    // a manhole cover with the city seal ring
+    const mh = rand(-2.6, 2.6);
+    const mz = -rand(4, 22);
+    g.add(cyl(toon(0x3a3c42, { metalness: 0.7, roughness: 0.5 }), 0.42, 0.03, mh, 0.012, mz, 24));
+    g.add(mesh(G.torus(0.3, 0.025, 24), toon(0x2a2c30, { metalness: 0.7, roughness: 0.5 }), mh, 0.03, mz));
+    g.children.at(-1).rotation.x = Math.PI / 2;
     const curb = toon(0xb9b2a5);
     const walk = toon(0xffffff, { map: paverTex(this.event === 'snow' ? '#f0f0f0' : '#d7d1c4') });
     for (const s of [-1, 1]) {
@@ -993,8 +1019,46 @@ export class World {
 
   // -------------------------------------------------------------------------
   // LINCOLN PARK — lakefront trail
-  buildLincoln({ g, animated, i, local }) {
+  /**
+   * Instanced grass tufts and wildflowers scattered over a lawn rectangle,
+   * swaying in the lake breeze (vertex shader). Skipped on low quality.
+   */
+  addGrass(ctx, x0, x1, count, flowers = true) {
+    if (!Q.pbr || this.event === 'snow') return;
+    const n = Math.round(count * Q.particles);
+    const tufts = new THREE.InstancedMesh(grassGeo(), grassMat(), n);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const sc = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    for (let k = 0; k < n; k++) {
+      p.set(rand(x0, x1), 0, -rand(0, CHUNK_LEN));
+      q.setFromAxisAngle(UP, rand(0, Math.PI * 2));
+      const s = rand(0.8, 1.5);
+      sc.set(s, s * rand(0.8, 1.3), s);
+      tufts.setMatrixAt(k, m.compose(p, q, sc));
+    }
+    tufts.receiveShadow = true;
+    ctx.post.push(tufts);
+    if (!flowers) return;
+    const fn = Math.round(n * 0.18);
+    const fl = new THREE.InstancedMesh(G.sphere(6, 4), flowerMat(), fn);
+    const cols = [0xffffff, 0xffd43b, 0xff6b9a, 0xc77dff, 0xff8c42];
+    const c = new THREE.Color();
+    for (let k = 0; k < fn; k++) {
+      p.set(rand(x0, x1), rand(0.18, 0.3), -rand(0, CHUNK_LEN));
+      sc.setScalar(rand(0.08, 0.13));
+      fl.setMatrixAt(k, m.compose(p, q.identity(), sc));
+      fl.setColorAt(k, c.set(cols[k % cols.length]));
+    }
+    ctx.post.push(fl);
+  }
+
+  buildLincoln(ctx) {
+    const { g, animated, i, local } = ctx;
     const L = CHUNK_LEN;
+    this.addGrass(ctx, 4.5, 24, 1300);
+    this.addGrass(ctx, -8, -4.4, 300);
     this.ground(g, toon(0xe1d9c8), 8.2);
     const grass = toon(0xffffff, { map: grassTex(this.event === 'snow' ? '#e9eef3' : '#6cc04a') });
     this.ground(g, grass, 20, 14, -0.02);
@@ -1059,6 +1123,57 @@ export class World {
       g.add(mesh(G.hemi(), glass, 17, 3, -15, 4, 4, 4), mesh(G.hemi(), glass, 27, 3, -15, 4, 4, 4));
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Instanced grass: three crossed blades with a dark-to-light gradient, swaying
+// via a shared time uniform.
+const UP = new THREE.Vector3(0, 1, 0);
+const GRASS_TIME = { value: 0 };
+let _grassGeo = null;
+let _grassMat = null;
+let _flowerMat = null;
+function grassGeo() {
+  if (_grassGeo) return _grassGeo;
+  const pos = [];
+  const col = [];
+  // five short blades fanned around the centre: a soft, dense clump
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2;
+    const cx = Math.cos(a) * 0.05;
+    const cz = Math.sin(a) * 0.05;
+    const tx = -Math.sin(a) * 0.035;
+    const tz = Math.cos(a) * 0.035;
+    const h = 0.2 + (k % 3) * 0.05;
+    pos.push(cx - tx, 0, cz - tz, cx + tx, 0, cz + tz, cx * 3, h, cz * 3);
+    col.push(0.2, 0.42, 0.12, 0.2, 0.42, 0.12, 0.55, 0.85, 0.32);
+  }
+  _grassGeo = new THREE.BufferGeometry();
+  _grassGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  _grassGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  _grassGeo.computeVertexNormals();
+  _grassGeo.userData.shared = true;
+  return _grassGeo;
+}
+function grassMat() {
+  if (_grassMat) return _grassMat;
+  _grassMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.85 });
+  _grassMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = GRASS_TIME;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vec4 wp = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        float sway = sin(uTime * 2.2 + wp.x * 0.7 + wp.z * 0.5) * 0.08 + sin(uTime * 3.7 + wp.z) * 0.03;
+        transformed.x += sway * position.y * 2.0;
+        transformed.z += sway * position.y;`);
+  };
+  return _grassMat;
+}
+function flowerMat() {
+  if (_flowerMat) return _flowerMat;
+  _flowerMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x222222 });
+  return _flowerMat;
 }
 
 const stationTexCache = new Map();

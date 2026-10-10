@@ -318,6 +318,7 @@ export class Game {
         p.vy = 0;
         p.grounded = true;
         this.audio.play('land');
+        this.landT = 0;
         this.fx.dust(new THREE.Vector3(p.x, p.y + 0.05, p.z), 6, true);
       }
     }
@@ -371,7 +372,8 @@ export class Game {
 
     // character + camera
     const mode = !p.grounded ? 'jump' : p.slideT > 0 ? 'slide' : 'run';
-    this.char.update(dt, { mode, runRate: this.speed / 16, lean: (tx - p.x) * -0.4, jumpT: Math.min(1, Math.abs(p.vy) / JUMP_V) });
+    this.landT = (this.landT ?? 1) + dt;
+    this.char.update(dt, { mode, runRate: this.speed / 16, lean: (tx - p.x) * -0.4, jumpT: Math.min(1, Math.abs(p.vy) / JUMP_V), vy: p.vy / JUMP_V, landT: this.landT });
     this.char.root.position.set(p.x, p.y, p.z);
     this.blob.position.set(p.x, ground.h + 0.03, p.z);
     const lift = Math.max(0, p.y - ground.h);
