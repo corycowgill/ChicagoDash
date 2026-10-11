@@ -10,6 +10,7 @@ import { Q } from './quality.js';
 import {
   makeLampPost, makeTwinLamp, makeBusShelter, makeMailbox, makeFlowerPlanter, makeTree, makeParkedBike,
   makeBalustrade, makeRailing, makeWaterTaxi, makeTourBoat, makePennantString, makeFan, makeTrain, makeBench,
+  makeCar, makeBus,
 } from './models.js';
 import {
   getChrome, cloudGate, crownFountain, buckinghamFountain, pritzkerPavilion, artInstituteLions, marinaCity,
@@ -200,6 +201,7 @@ export class World {
       this.lakeMat.needsUpdate = true;
     }
     for (const m of this.skylineMats) m.color.copy(m.userData.base).multiplyScalar(night ? 0.45 : 1);
+    for (const m of this.cloudMats) m.color.set(night ? 0x3a4270 : snow ? 0xd8dee8 : 0xffffff);
     getChrome().color.set(night ? 0x6f7a99 : 0xdfe6ee);
     for (const m of this.skylineWin) m.opacity = night ? 1 : 0;
   }
@@ -400,22 +402,20 @@ export class World {
     g.add(fw.group);
 
     // Clouds
-    const cloudMat = Q.pbr
-      ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, emissive: 0xb8c8e0, emissiveIntensity: 0.35, fog: false })
-      : new THREE.MeshToonMaterial({ color: 0xffffff, fog: false });
-    this.skylineMats.push(Object.assign(cloudMat, { userData: { base: new THREE.Color(0xffffff) } }));
+    // Painted, softly lit cumulus billboards in three depth layers
     this.clouds = new THREE.Group();
-    for (let i = 0; i < 9; i++) {
-      const c = new THREE.Group();
-      for (let j = 0; j < 8; j++) {
-        const r = rand(4, 9);
-        c.add(mesh(G.foliage(j + i * 3), cloudMat, j * 4.2 - 15, rand(-1, 2.5) + (j > 1 && j < 6 ? 2 : 0), rand(-3, 3), r * 2, r * 1.6, r * 2));
-      }
-      c.position.set(rand(-220, 220), rand(120, 175), rand(-60, -20));
-      c.scale.y = 0.55;
+    this.cloudMats = [];
+    for (let i = 0; i < 18; i++) {
+      const mat = new THREE.SpriteMaterial({ map: cloudTex(i % 4), transparent: true, depthWrite: false, fog: false, opacity: 0.95 });
+      this.cloudMats.push(mat);
+      const c = new THREE.Sprite(mat);
+      const far = i % 3;
+      const w = rand(70, 130) * (1 - far * 0.2);
+      c.scale.set(w, w * 0.42, 1);
+      c.position.set(rand(-300, 300), rand(105, 185) - far * 15, -40 - far * 60);
+      c.userData.drift = 1.5 - far * 0.4;
       this.clouds.add(c);
     }
-    this.clouds = bake(this.clouds);
     g.add(this.clouds);
 
     // Sun / moon / stars
@@ -504,7 +504,10 @@ export class World {
       }
     }
     this.skyline.position.z = playerZ - 330;
-    this.clouds.position.x = (this.time * 2) % 80;
+    for (const c of this.clouds.children) {
+      c.position.x += dt * c.userData.drift;
+      if (c.position.x > 320) c.position.x -= 640;
+    }
     this.ferris.rotation.z = this.time * 0.06;
     // water flow
     const wm = Q.pbr ? 'normalMap' : 'map';
@@ -813,6 +816,15 @@ export class World {
       const lamp = makeTwinLamp();
       lamp.position.set(4.8, 0, -z);
       g.add(lamp);
+    }
+    // Michigan Avenue traffic: cars and CTA buses, driving on the right
+    for (let k = 0; k < 2; k++) {
+      const north = k === 0; // north-bound traffic heads the same way as the runner
+      const veh = bake(Math.random() < 0.25 ? makeBus() : makeCar());
+      veh.position.set(north ? 16.2 : 12.4, 0, -rand(0, L));
+      if (north) veh.rotation.y = Math.PI;
+      const sp = rand(7, 13);
+      animated.push({ obj: veh, tail: 8, update(dt) { veh.position.z += dt * sp * (north ? -1 : 1); } });
     }
     const landmark = [2, 5, 9, 13, 17].includes(local);
     if (local === 2) {
@@ -1295,6 +1307,44 @@ function flowerMat() {
   if (_flowerMat) return _flowerMat;
   _flowerMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, emissive: 0x222222 });
   return _flowerMat;
+}
+
+/** Soft painted cumulus: overlapping puffs, sunlit tops and cool undersides. */
+const cloudTexCache = [];
+function cloudTex(v) {
+  if (cloudTexCache[v]) return cloudTexCache[v];
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const g = c.getContext('2d');
+  let s = v * 977 + 13;
+  const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const puffs = [];
+  for (let k = 0; k < 14; k++) {
+    const x = 40 + r() * 176;
+    const base = 92 - Math.sin(((x - 40) / 176) * Math.PI) * (30 + r() * 20);
+    puffs.push([x, base + r() * 14, 16 + r() * 22]);
+  }
+  // cool underside pass, then sunlit puffs on top
+  for (const [x, y, rad] of puffs) {
+    const gr = g.createRadialGradient(x, y + 6, 0, x, y + 6, rad);
+    gr.addColorStop(0, 'rgba(176,190,214,0.95)');
+    gr.addColorStop(1, 'rgba(176,190,214,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 256, 128);
+  }
+  for (const [x, y, rad] of puffs) {
+    const gr = g.createRadialGradient(x - rad * 0.25, y - rad * 0.35, 0, x, y, rad);
+    gr.addColorStop(0, 'rgba(255,255,255,1)');
+    gr.addColorStop(0.55, 'rgba(250,250,255,0.85)');
+    gr.addColorStop(1, 'rgba(240,244,252,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 256, 128);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  cloudTexCache[v] = t;
+  return t;
 }
 
 const stationTexCache = new Map();

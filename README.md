@@ -77,6 +77,10 @@ npm run build      # bundles Three.js, copies intro/ into dist/
   - Buildings with Chicago's black iron fire escapes, window A/C units, and setback crowns with spires and aircraft beacons on the towers.
   - Aerial perspective: the haze warms toward the sun and thins as you look up, so tower bases melt into the distance; the skyline fades into the horizon.
   - Detailed CTA car artwork: fluted panels, door leaves, riders in the windows and a lit destination sign.
+  - Painted cumulus clouds in three drifting depth layers, with sunlit tops and cool undersides.
+  - Sun shafts (god rays) streaming past the skyline and clouds when you face the sun, plus contrast-adaptive sharpening.
+  - Michigan Avenue traffic beside Millennium Park: cars and CTA buses in both directions, headlights and taillights glowing at night.
+  - An athletic run cycle: hip and shoulder counter-twist, bent-elbow arm pump, big knee lift and a level head.
   - Physically based materials lit by an environment baked from the sky, with filmic (ACES) tone mapping.
   - Post-processing: bloom on lights, signs and coins; color grading and vignette; a radial speed blur at high speed; and a red flash when you're hit.
   - Surface relief derived on the GPU from every painted texture (bump mapping), so mortar, pavers, window recesses and railroad ties catch the light.

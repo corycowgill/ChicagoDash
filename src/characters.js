@@ -348,24 +348,32 @@ export function buildCharacter(id, outfitIdx = 0) {
     const ph = t * 11;
     body.rotation.set(0, 0, 0);
     body.position.set(0, 0, 0);
+    hips.rotation.set(0, 0, 0);
     torso.rotation.set(0, 0, 0);
     head.rotation.set(0, 0, 0);
     if (s.mode === 'run') {
-      const bob = Math.abs(Math.sin(ph)) * 0.08;
-      body.position.y = bob;
-      torso.rotation.x = -0.18;
-      torso.rotation.y = Math.sin(ph) * 0.12;
-      body.rotation.z = (s.lean ?? 0) * 0.25;
+      // Athletic run: bounce at each footfall, hips twist against the
+      // shoulders, arms pump with bent elbows, head stays level.
+      const bob = Math.abs(Math.sin(ph));
+      body.position.y = bob * 0.1 - 0.02;
+      hips.rotation.y = Math.sin(ph) * 0.18;
+      torso.rotation.x = -0.24 - bob * 0.04;
+      torso.rotation.y = -Math.sin(ph) * 0.32;
+      torso.rotation.z = Math.sin(ph) * 0.04;
+      head.rotation.y = Math.sin(ph) * 0.26; // counter-rotate: eyes on the road
+      head.rotation.x = 0.16;
+      body.rotation.z = (s.lean ?? 0) * 0.3;
       legs.forEach(({ hip, knee, s: side }) => {
-        const p = Math.sin(ph + (side > 0 ? 0 : Math.PI));
-        hip.rotation.x = p * 0.9;
-        knee.rotation.x = -Math.max(0, -Math.cos(ph + (side > 0 ? 0 : Math.PI))) * 1.4 - 0.15;
+        const a = ph + (side > 0 ? 0 : Math.PI);
+        hip.rotation.x = Math.sin(a) * 1.0 + 0.1;
+        // big knee lift on the recovery swing, near-straight at push-off
+        knee.rotation.x = -Math.max(0, -Math.cos(a)) * 1.7 - 0.12;
       });
       arms.forEach(({ shoulder, fore, s: side }) => {
-        const p = Math.sin(ph + (side > 0 ? Math.PI : 0));
-        shoulder.rotation.x = p * 0.9;
-        shoulder.rotation.z = side * 0.15;
-        fore.rotation.x = 1.2;
+        const a = ph + (side > 0 ? Math.PI : 0);
+        shoulder.rotation.x = Math.sin(a) * 1.05;
+        shoulder.rotation.z = side * 0.18;
+        fore.rotation.x = 1.35 + Math.sin(a) * 0.25;
       });
     } else if (s.mode === 'jump') {
       torso.rotation.x = -0.1;

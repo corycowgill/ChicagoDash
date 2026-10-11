@@ -35,6 +35,11 @@ const GradeShader = {
     uTint: { value: new THREE.Color(1.0, 0.985, 0.95) },
     uFlash: { value: 0 },
     uFlashColor: { value: new THREE.Color(1, 0.15, 0.1) },
+    uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
+    uSharpen: { value: 0.28 },
+    uSunPos: { value: new THREE.Vector2(0.3, 0.8) },
+    uRays: { value: 0 },
+    uRayColor: { value: new THREE.Color(1.0, 0.86, 0.62) },
     uShadowTone: { value: new THREE.Color(0.96, 0.98, 1.05) },
     uHighTone: { value: new THREE.Color(1.05, 1.0, 0.94) },
   },
@@ -43,7 +48,10 @@ const GradeShader = {
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uSpeed, uVignette, uSaturation, uContrast, uFlash;
+    uniform float uSpeed, uVignette, uSaturation, uContrast, uFlash, uSharpen, uRays;
+    uniform vec2 uTexel, uSunPos;
+    uniform vec3 uRayColor;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     uniform vec3 uTint, uFlashColor, uShadowTone, uHighTone;
     varying vec2 vUv;
     void main() {
@@ -58,6 +66,32 @@ const GradeShader = {
         col /= 8.0;
       } else {
         col = texture2D(tDiffuse, vUv).rgb;
+        // contrast-adaptive style sharpening: restores crispness lost to MSAA
+        vec3 n = texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb;
+        vec3 s = texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
+        vec3 e = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb;
+        vec3 w = texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb;
+        vec3 mn = min(col, min(min(n, s), min(e, w)));
+        vec3 mx = max(col, max(max(n, s), max(e, w)));
+        vec3 amt = clamp(min(mn, 1.0 - mx) / max(mx, 0.001), 0.0, 1.0);
+        col += (col * 4.0 - n - s - e - w) * uSharpen * sqrt(amt) * 0.25;
+      }
+      // god rays: march toward the sun, gathering bright sky/cloud pixels;
+      // buildings in the way are dark, so they cast visible shafts
+      if (uRays > 0.01) {
+        vec2 toSun = uSunPos - vUv;
+        float jitter = hash(vUv * 1000.0);
+        vec3 shafts = vec3(0.0);
+        float decay = 1.0;
+        for (int i = 0; i < 20; i++) {
+          vec2 p = vUv + toSun * ((float(i) + jitter) / 20.0) * 0.85;
+          vec3 c = texture2D(tDiffuse, clamp(p, 0.001, 0.999)).rgb;
+          float lum2 = dot(c, vec3(0.299, 0.587, 0.114));
+          shafts += max(lum2 - 0.85, 0.0) * decay;
+          decay *= 0.93;
+        }
+        float fall = 1.0 - smoothstep(0.0, 0.9, length(toSun * vec2(1.6, 1.0)));
+        col += uRayColor * shafts * 0.09 * uRays * fall;
       }
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(l), col, uSaturation);
@@ -102,6 +136,7 @@ export class Post {
     if (!this.enabled) return;
     this.composer.setPixelRatio(this.renderer.getPixelRatio());
     this.composer.setSize(w, h);
+    this.grade.uniforms.uTexel.value.set(1 / (w * this.renderer.getPixelRatio()), 1 / (h * this.renderer.getPixelRatio()));
     this.bloom.setSize(w * this.renderer.getPixelRatio() * Q.bloomScale, h * this.renderer.getPixelRatio() * Q.bloomScale);
   }
 
@@ -117,6 +152,14 @@ export class Post {
     u.uShadowTone.value.set(...(ev === 'night' ? [0.9, 0.95, 1.12] : [0.96, 0.98, 1.05]));
     u.uHighTone.value.set(...(ev === 'night' ? [1.08, 1.0, 0.9] : ev === 'snow' ? [1.0, 1.0, 1.0] : [1.05, 1.0, 0.94]));
     u.uVignette.value = ev === 'night' ? 0.55 : 0.35;
+  }
+
+  /** Screen-space sun position (0..1) and how strongly to draw shafts. */
+  setSun(x, y, strength) {
+    if (!this.enabled) return;
+    const u = this.grade.uniforms;
+    u.uSunPos.value.set(x, y);
+    u.uRays.value += (strength - u.uRays.value) * 0.1;
   }
 
   render(dt, speedFx = 0, flash = 0) {

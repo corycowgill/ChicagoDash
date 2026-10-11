@@ -632,7 +632,7 @@ export function makeFallenBranch() {
 // ---------------------------------------------------------------------------
 function lampHead(g, x, y, z, big = 1) {
   // Lantern: glowing globe, a halo for the bloom pass and a pool of light on the ground at night.
-  g.add(mesh(G.sphere(12, 10), toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.35, nightGlow: 3.2, roughness: 0.15 }), x, y, z, 0.52 * big, 0.52 * big, 0.52 * big));
+  g.add(mesh(G.sphere(12, 10), toon(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.35, nightGlow: 2.4, roughness: 0.15 }), x, y, z, 0.52 * big, 0.52 * big, 0.52 * big));
   const h1 = mesh(G.plane(), nightGlowMat(0xffd27a, 0.5), x, y, z, 1.6 * big, 1.6 * big, 1);
   const h2 = h1.clone();
   h2.rotation.y = Math.PI / 2;
@@ -840,3 +840,56 @@ export function makeFan(color) {
 }
 
 export { C as COLORS };
+
+// ---------------------------------------------------------------------------
+// Street traffic (seen below the "L")
+const CAR_COLORS = [0xe63946, 0x2563c9, 0xf2f2f2, 0x22262d, 0xffc61a, 0x6c757d, 0x2f9e44];
+export function makeCar() {
+  const g = new THREE.Group();
+  const paint = toon(CAR_COLORS[(Math.random() * CAR_COLORS.length) | 0], { roughness: 0.25, metalness: 0.5 });
+  const glass = toon(0x1a2533, { roughness: 0.08, metalness: 0.6 });
+  const tire = toon(0x1c1c1c, { roughness: 0.8 });
+  g.add(mesh(G.rboxSized(1.8, 0.7, 4.2, 0.25), paint, 0, 0.65, 0));
+  g.add(mesh(G.rboxSized(1.6, 0.6, 2.2, 0.25), glass, 0, 1.2, -0.2));
+  g.add(mesh(G.rboxSized(1.62, 0.08, 2.0, 0.04), paint, 0, 1.52, -0.2));
+  for (const [x, z] of [[-0.85, 1.3], [0.85, 1.3], [-0.85, -1.3], [0.85, -1.3]]) {
+    const w = mesh(G.cyl(16), tire, x, 0.35, z, 0.66, 0.24, 0.66);
+    w.rotation.z = Math.PI / 2;
+    g.add(w);
+  }
+  const head = toon(0xfff6d8, { emissive: 0xfff2c0, emissiveIntensity: 0.4, nightGlow: 3.5, roughness: 0.1 });
+  const tail = toon(0xff2a2a, { emissive: 0xff0000, emissiveIntensity: 0.4, nightGlow: 3, roughness: 0.2 });
+  for (const x of [-0.6, 0.6]) {
+    g.add(mesh(G.rboxSized(0.36, 0.16, 0.06, 0.04), head, x, 0.75, 2.1));
+    g.add(mesh(G.rboxSized(0.36, 0.14, 0.06, 0.04), tail, x, 0.78, -2.1));
+    g.add(mesh(G.plane(), nightGlowMat(0xfff2c0, 0.8), x, 0.75, 2.2, 1.4, 1.4, 1));
+  }
+  return g;
+}
+
+export function makeBus() {
+  // CTA-style bus: white with a red and blue band, route sign glowing at night.
+  const g = new THREE.Group();
+  const body = toon(0xf3f4f6, { roughness: 0.35, metalness: 0.2 });
+  const glass = toon(0x1a2533, { roughness: 0.08, metalness: 0.6 });
+  const tire = toon(0x1c1c1c, { roughness: 0.8 });
+  g.add(mesh(G.rboxSized(2.5, 2.9, 12, 0.3), body, 0, 1.75, 0));
+  for (const x of [-1.26, 1.26]) {
+    g.add(mesh(G.rboxSized(0.04, 0.9, 10.5, 0.03), glass, x, 2.2, -0.3));
+    g.add(mesh(G.rboxSized(0.05, 0.18, 11.8, 0.03), toon(0xe4002b), x, 1.25, 0));
+    g.add(mesh(G.rboxSized(0.05, 0.18, 11.8, 0.03), toon(0x4fa3e0), x, 1.05, 0));
+  }
+  g.add(mesh(G.rboxSized(2.2, 1.2, 0.05, 0.05), glass, 0, 2.1, 6.0));
+  g.add(mesh(G.rboxSized(1.6, 0.3, 0.06, 0.03), toon(0x111111, { emissive: 0xffb703, emissiveIntensity: 0.5, nightGlow: 2.5 }), 0, 2.95, 6.0));
+  for (const [x, z] of [[-1.1, 4], [1.1, 4], [-1.1, -3.8], [1.1, -3.8]]) {
+    const w = mesh(G.cyl(16), tire, x, 0.5, z, 1.0, 0.35, 1.0);
+    w.rotation.z = Math.PI / 2;
+    g.add(w);
+  }
+  const head = toon(0xfff6d8, { emissive: 0xfff2c0, emissiveIntensity: 0.4, nightGlow: 3.5, roughness: 0.1 });
+  for (const x of [-0.9, 0.9]) {
+    g.add(mesh(G.rboxSized(0.36, 0.2, 0.06, 0.04), head, x, 0.8, 6.02));
+    g.add(mesh(G.plane(), nightGlowMat(0xfff2c0, 0.8), x, 0.8, 6.1, 1.6, 1.6, 1));
+  }
+  return g;
+}

@@ -202,6 +202,13 @@ export class Game {
     this.fx.speedLines(dt, this.camera, running ? Math.min(1, Math.max(0, (this.speed - 24) / 10)) + (this.powers.hotdog > 0 ? 1 : 0) : 0);
     const speedFx = running ? Math.min(1, Math.max(0, (this.speed - 22) / 14)) * 0.55 + (this.powers.hotdog > 0 ? 0.8 : 0) : 0;
     this.flash = Math.max(0, this.flash - dt * 2.5);
+    // god rays only in daylight, when the sun is in front of the camera
+    if (this.world.sunDisc.visible) {
+      this.world.sunDisc.getWorldPosition(this._sunV ??= new THREE.Vector3());
+      const sp = this._sunV.project(this.camera);
+      const onScreen = sp.z < 1 && Math.abs(sp.x) < 1.6 && Math.abs(sp.y) < 1.6;
+      this.post.setSun(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5, onScreen ? 1 : 0);
+    } else this.post.setSun(0.5, 0.9, 0);
     this.post.render(dt, speedFx, this.flash);
     this.adaptQuality(dt);
   }
