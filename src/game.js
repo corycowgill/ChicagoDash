@@ -57,6 +57,9 @@ export class Game {
     this.shieldMesh = new THREE.Mesh(G.sphere(32, 24), makeShieldMaterial());
     this.shieldMesh.scale.set(1.9, 2.4, 1.9);
     this.shieldMesh.visible = false;
+    this.shieldMesh.userData.noAO = true;
+    this.shieldMesh.renderOrder = 10;
+    this.shieldMesh.frustumCulled = false;
     this.scene.add(this.shieldMesh);
     // Soft contact shadow that stays on the ground (and shrinks) as you jump.
     this.blob = new THREE.Mesh(G.plane(), basic(0xffffff, { map: blobShadowTex(), transparent: true, depthWrite: false }));
@@ -434,8 +437,8 @@ export class Game {
     this.shieldMesh.visible = this.powers.flag > 0;
     if (this.shieldMesh.visible) {
       this.shieldMesh.position.set(p.x, p.y + (p.slideT > 0 && p.grounded ? 0.5 : 1.0), p.z);
-      // flicker when the shield is about to run out
-      if (this.powers.flag < 2 && Math.sin(this.time * 30) < 0) this.shieldMesh.visible = false;
+      // pulse gently when the shield is about to run out (no hard on/off strobing)
+      this.shieldMesh.material.uniforms.uFade.value = this.powers.flag < 2 ? 0.55 + 0.45 * Math.cos(this.time * 9) : 1;
     }
     if (this.powers.hotdog > 0 && Math.random() < 0.5) {
       this.fx.burst(new THREE.Vector3(p.x + (Math.random() - 0.5), p.y + 0.3, p.z + 0.6), { color: 0xffb347, n: 1, speed: 1, size: 0.18, life: 0.3, gravity: 0, shape: 'spark', up: 0.5 });
@@ -703,7 +706,7 @@ function makeShieldMaterial() {
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
-    uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(0x6ec6f0) }, uStar: { value: new THREE.Color(0xff3b4f) } },
+    uniforms: { uTime: { value: 0 }, uFade: { value: 1 }, uColor: { value: new THREE.Color(0x6ec6f0) }, uStar: { value: new THREE.Color(0xff3b4f) } },
     vertexShader: /* glsl */ `
       varying vec3 vN; varying vec3 vV; varying vec3 vP;
       void main() {
@@ -712,14 +715,22 @@ function makeShieldMaterial() {
         gl_Position = projectionMatrix * wp;
       }`,
     fragmentShader: /* glsl */ `
-      uniform float uTime; uniform vec3 uColor; uniform vec3 uStar;
+      uniform float uTime; uniform float uFade; uniform vec3 uColor; uniform vec3 uStar;
       varying vec3 vN; varying vec3 vV; varying vec3 vP;
       void main() {
-        float rim = pow(1.0 - abs(dot(vN, vV)), 2.2);
-        float bands = 0.5 + 0.5 * sin(vP.y * 28.0 - uTime * 5.0);
-        float hex = step(0.92, abs(sin(vP.x * 22.0 + uTime) * sin(vP.y * 22.0) * sin(vP.z * 22.0 - uTime)));
-        vec3 col = uColor * (rim * 1.6 + bands * 0.12) + uStar * hex * 0.6;
-        gl_FragColor = vec4(col, rim * 0.9 + 0.08 + hex * 0.3);
+        // Renormalise and clamp: where the bubble faces the camera, dot() can round to
+        // just over 1, and pow() of a negative number is NaN on real GPUs. A NaN pixel
+        // in the HDR buffer gets smeared over the whole screen by bloom (flicker).
+        float facing = clamp(abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0);
+        float rim = pow(max(1.0 - facing, 0.0), 2.2);
+        float bands = 0.5 + 0.5 * sin(vP.y * 18.0 - uTime * 4.0);
+        // soft, low-frequency star glints instead of a hard step() that aliases frame to frame
+        float g = abs(sin(vP.x * 9.0 + uTime * 0.8) * sin(vP.y * 9.0) * sin(vP.z * 9.0 - uTime * 0.8));
+        float hex = smoothstep(0.7, 0.95, g);
+        vec3 col = uColor * (rim * 0.95 + bands * 0.08) + uStar * hex * 0.25;
+        float a = clamp(rim * 0.8 + 0.06 + hex * 0.15, 0.0, 1.0) * uFade;
+        // stay under the bloom threshold so the bubble doesn't pulse the whole frame
+        gl_FragColor = vec4(min(col, vec3(0.85)), a);
       }`,
   });
 }
